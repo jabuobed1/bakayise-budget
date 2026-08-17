@@ -1,0 +1,6 @@
+{
+  "name": "Bagaiise-budget",
+  "description": "Family budgeting, expense tracking, and Dave Ramsey baby steps tracker tailored for South Africa.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

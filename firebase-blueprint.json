@@ -1,0 +1,241 @@
+{
+  "entities": {
+    "FinancialAccount": {
+      "title": "FinancialAccount",
+      "description": "Family banking, savings, or investment account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["cheque", "savings", "tax_free", "credit_card", "investment", "cash", "loan", "other"], "maxLength": 32 },
+        "institution": { "type": "string", "maxLength": 64 },
+        "accountNumberMask": { "type": "string", "maxLength": 32 },
+        "openingBalance": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 16 },
+        "color": { "type": "string", "maxLength": 32 },
+        "icon": { "type": "string", "maxLength": 64 },
+        "isDefault": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "type", "openingBalance"]
+    },
+    "BudgetPeriod": {
+      "title": "BudgetPeriod",
+      "description": "Monthly pay cycle budget period",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "startDate": { "type": "string", "maxLength": 32 },
+        "endDate": { "type": "string", "maxLength": 32 },
+        "setupDueDate": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["active", "planning", "completed", "archived"], "maxLength": 32 },
+        "totalPlannedIncome": { "type": "number" },
+        "totalPlannedExpenses": { "type": "number" },
+        "openingFloatingBalance": { "type": "number" },
+        "closingFloatingBalance": { "type": "number" },
+        "autoCarryoverFromPrevious": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "startDate", "endDate", "status"]
+    },
+    "Income": {
+      "title": "Income",
+      "description": "Income stream entry for a pay period",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "periodId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 128 },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["primary_salary", "spouse_salary", "freelance", "side_hustle", "bonus", "rental", "other"], "maxLength": 64 },
+        "sourceTag": { "type": "string", "maxLength": 64 },
+        "accountId": { "type": "string", "maxLength": 128 },
+        "receivedDate": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["expected", "received"], "maxLength": 32 },
+        "order": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "periodId", "title", "amount", "type", "status"]
+    },
+    "BudgetCategory": {
+      "title": "BudgetCategory",
+      "description": "Budget category envelope with allocated amount",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "periodId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "group": { "type": "string", "enum": ["giving", "housing", "utilities", "food", "transport", "health_insurance", "debt_snowball", "savings_goals", "lifestyle", "personal"], "maxLength": 64 },
+        "tag": { "type": "string", "maxLength": 64 },
+        "allocatedAmount": { "type": "number" },
+        "defaultAccountId": { "type": "string", "maxLength": 128 },
+        "color": { "type": "string", "maxLength": 32 },
+        "icon": { "type": "string", "maxLength": 64 },
+        "order": { "type": "number" },
+        "isEssential": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "periodId", "name", "group", "allocatedAmount"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Logged expense transaction under a budget category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "periodId": { "type": "string", "maxLength": 128 },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "accountId": { "type": "string", "maxLength": 128 },
+        "amount": { "type": "number" },
+        "title": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 32 },
+        "loggedBy": { "type": "string", "enum": ["Husband", "Wife", "Shared"], "maxLength": 32 },
+        "paymentMethod": { "type": "string", "maxLength": 64 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "periodId", "categoryId", "amount", "title", "date", "loggedBy"]
+    },
+    "Debt": {
+      "title": "Debt",
+      "description": "Debt item for Baby Step 2 Debt Snowball",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "lender": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "enum": ["store_card", "credit_card", "personal_loan", "car_finance", "student_loan", "other"], "maxLength": 64 },
+        "balance": { "type": "number" },
+        "originalBalance": { "type": "number" },
+        "minimumPayment": { "type": "number" },
+        "interestRate": { "type": "number" },
+        "order": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "paid_off"], "maxLength": 32 },
+        "paidOffDate": { "type": "string", "maxLength": 32 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "category", "balance", "minimumPayment", "status"]
+    },
+    "BabyStepsState": {
+      "title": "BabyStepsState",
+      "description": "Dave Ramsey 7 Baby Steps configuration and progress state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "currentStep": { "type": "number" },
+        "step1EmergencyFundTarget": { "type": "number" },
+        "step1CurrentBalance": { "type": "number" },
+        "step3MonthsTarget": { "type": "number" },
+        "step3CurrentBalance": { "type": "number" },
+        "step4MonthlyInvestment": { "type": "number" },
+        "step5CollegeFundBalance": { "type": "number" },
+        "step6BondBalance": { "type": "number" },
+        "step6MonthlyExtra": { "type": "number" },
+        "step7GivingMonthly": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "currentStep", "step1EmergencyFundTarget", "step1CurrentBalance"]
+    },
+    "EmergencyFundLog": {
+      "title": "EmergencyFundLog",
+      "description": "Transaction logs for Starter or Full Emergency Fund",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "step": { "type": "number" },
+        "type": { "type": "string", "enum": ["deposit", "withdrawal", "adjustment"], "maxLength": 32 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "maxLength": 32 },
+        "description": { "type": "string", "maxLength": 256 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "step", "type", "amount", "date", "description"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Family user profile and household workspace linking",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["Hubby", "Wifey"], "maxLength": 32 },
+        "householdId": { "type": "string", "maxLength": 128 },
+        "avatarColor": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "email", "role", "householdId"]
+    },
+    "ArchivedWorksheet": {
+      "title": "ArchivedWorksheet",
+      "description": "Saved snapshot backup of worksheet before reset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "archivedAt": { "type": "string", "maxLength": 64 },
+        "archivedBy": { "type": "string", "maxLength": 128 },
+        "archivedByEmail": { "type": "string", "maxLength": 128 },
+        "periodName": { "type": "string", "maxLength": 128 },
+        "householdId": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "title", "archivedAt", "archivedBy", "householdId"]
+    }
+  },
+  "firestore": {
+    "/user_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Registered family user profiles"
+    },
+    "/archived_worksheets/{archiveId}": {
+      "schema": { "$ref": "#/entities/ArchivedWorksheet" },
+      "description": "Archived worksheet backups"
+    },
+    "/financial_accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/FinancialAccount" },
+      "description": "Family bank and financial accounts"
+    },
+    "/budget_periods/{periodId}": {
+      "schema": { "$ref": "#/entities/BudgetPeriod" },
+      "description": "Monthly budget pay periods"
+    },
+    "/incomes/{incomeId}": {
+      "schema": { "$ref": "#/entities/Income" },
+      "description": "Income logs for pay periods"
+    },
+    "/budget_categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/BudgetCategory" },
+      "description": "Envelopes / categories for budgeting"
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Expenses logged against categories"
+    },
+    "/debts/{debtId}": {
+      "schema": { "$ref": "#/entities/Debt" },
+      "description": "Debt snowball list"
+    },
+    "/baby_steps_state/{stateId}": {
+      "schema": { "$ref": "#/entities/BabyStepsState" },
+      "description": "Dave Ramsey Baby Steps progress tracking state"
+    },
+    "/emergency_fund_logs/{logId}": {
+      "schema": { "$ref": "#/entities/EmergencyFundLog" },
+      "description": "History of emergency fund contributions and withdrawals"
+    }
+  }
+}
