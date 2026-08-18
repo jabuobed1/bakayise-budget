@@ -29,6 +29,7 @@ import {
   ShieldCheck,
   Building2,
   Calendar,
+  Check,
 } from 'lucide-react';
 
 interface AccountModalProps {
@@ -52,8 +53,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const [isDefault, setIsDefault] = useState(false);
   const [notes, setNotes] = useState('');
 
-  // Baby Step Assignment (1 = Starter Emergency, 3 = 3-6mo Emergency, 4 = Investing, 5 = College, 6 = Bond)
-  const [babyStepAssignment, setBabyStepAssignment] = useState<number | null>(null);
+  // Baby Step Assignments (Multiple steps can be linked to one account)
+  const [babyStepAssignments, setBabyStepAssignments] = useState<number[]>([]);
 
   // Standard balance (for cash, cheque, savings, standard loan)
   const [openingBalance, setOpeningBalance] = useState('0');
@@ -104,8 +105,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       setColor(initialAccount.color || '#30D158');
       setIsDefault(Boolean(initialAccount.isDefault));
       setNotes(initialAccount.notes || '');
-      setBabyStepAssignment(
-        initialAccount.babyStepAssignment !== undefined ? initialAccount.babyStepAssignment : null
+      setBabyStepAssignments(
+        initialAccount.babyStepAssignments || (initialAccount.babyStepAssignment !== undefined && initialAccount.babyStepAssignment !== null ? [initialAccount.babyStepAssignment] : [])
       );
 
       // Credit card
@@ -227,7 +228,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       setColor('#30D158');
       setIsDefault(false);
       setNotes('');
-      setBabyStepAssignment(null);
+      setBabyStepAssignments([]);
 
       // Credit card defaults
       setCreditLimit('25000');
@@ -366,7 +367,6 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     } else if (newType === 'home_loan') {
       setInterestRate('11.75');
       setMonthlyFee('69.00');
-      setBabyStepAssignment(6);
     } else if (newType === 'vehicle_loan') {
       setInterestRate('12.50');
       setMonthlyFee('69.00');
@@ -374,10 +374,6 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     } else if (newType === 'loan') {
       setInterestRate('18.50');
       setMonthlyFee('69.00');
-    } else if (newType === 'savings') {
-      setBabyStepAssignment(1);
-    } else if (newType === 'tax_free' || newType === 'investment') {
-      setBabyStepAssignment(4);
     }
   };
 
@@ -510,7 +506,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       notes: notes.trim() || undefined,
 
       // Baby Step Assignment
-      babyStepAssignment: babyStepAssignment,
+      babyStepAssignment: babyStepAssignments.length > 0 ? babyStepAssignments[0] : null,
+      babyStepAssignments: babyStepAssignments,
 
       // Credit card details
       creditLimit: finalCreditLimit,
@@ -709,35 +706,58 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             type === 'cheque' ||
             type === 'cash' ||
             type === 'other') && (
-            <div className="p-3.5 rounded-[16px] bg-[#252528] border border-white/10 space-y-2">
+            <div className="p-3.5 rounded-[16px] bg-[#252528] border border-white/10 space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-white flex items-center gap-1.5">
                   <Trophy className="w-4 h-4 text-[#FF9F0A]" />
-                  <span>Assign to Dave Ramsey Baby Step (Optional)</span>
+                  <span>Assign to Dave Ramsey Baby Steps (Optional)</span>
                 </label>
-                {babyStepAssignment && (
+                {babyStepAssignments.length > 0 && (
                   <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
-                    Step {babyStepAssignment} Linked
+                    {babyStepAssignments.length} Steps Linked
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-slate-400">
-                Link this account so its live balance automatically tracks your progress against the required target for that step.
+                Link this account to multiple Baby Steps. Its live balance will track progress for each assigned step.
               </p>
-              <select
-                value={babyStepAssignment !== null && babyStepAssignment !== undefined ? babyStepAssignment.toString() : ''}
-                onChange={(e) =>
-                  setBabyStepAssignment(e.target.value ? parseInt(e.target.value) : null)
-                }
-                className="w-full bg-[#1C1C1E] border border-white/10 text-white rounded-[10px] px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#30D158]"
-              >
-                <option value="">None (Everyday Liquidity / General Account)</option>
-                <option value="1">Baby Step 1: Starter Emergency Fund (R20,000 Target)</option>
-                <option value="3">Baby Step 3: Fully Funded 3–6 Months Emergency Fund</option>
-                <option value="4">Baby Step 4: 15% Retirement & Long-Term Wealth</option>
-                <option value="5">Baby Step 5: Children's College / Education Fund</option>
-                <option value="6">Baby Step 6: Pay Off Primary Home Bond Early</option>
-              </select>
+              
+              <div className="grid grid-cols-1 gap-2">
+                {[
+                  { id: 1, label: "Baby Step 1: Starter Emergency Fund (R20,000 Target)" },
+                  { id: 3, label: "Baby Step 3: Fully Funded 3–6 Months Emergency Reserve" },
+                  { id: 4, label: "Baby Step 4: Children's College / Education Fund" },
+                  { id: 5, label: "Baby Step 5: 15% Retirement & Long-Term Wealth" },
+                  { id: 6, label: "Baby Step 6: Pay Off Primary Home Bond Early" }
+                ].map((step) => {
+                  const isSelected = babyStepAssignments.includes(step.id);
+                  return (
+                    <button
+                      key={step.id}
+                      type="button"
+                      onClick={() => {
+                        if (isSelected) {
+                          setBabyStepAssignments(babyStepAssignments.filter(id => id !== step.id));
+                        } else {
+                          setBabyStepAssignments([...babyStepAssignments, step.id]);
+                        }
+                      }}
+                      className={`flex items-center gap-3 p-2.5 rounded-xl border text-left transition ${
+                        isSelected 
+                          ? 'bg-amber-500/10 border-amber-500/40 text-amber-100 shadow-sm' 
+                          : 'bg-black/20 border-white/5 text-slate-400 hover:bg-white/5 hover:border-white/10'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition ${
+                        isSelected ? 'bg-amber-500 border-amber-500 text-black' : 'border-white/20'
+                      }`}>
+                        {isSelected && <Check className="w-3 h-3 stroke-[4]" />}
+                      </div>
+                      <span className="text-[11px] font-semibold">{step.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 

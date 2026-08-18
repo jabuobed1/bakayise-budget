@@ -41,6 +41,7 @@ import {
   restoreArchivedWorksheet,
   deleteArchivedWorksheet,
   syncUserProfile,
+  executeTransfer,
 } from './services/firestoreService';
 import {
   BudgetPeriod,
@@ -66,6 +67,7 @@ import { ExcelBudgetView } from './components/ExcelBudgetView';
 import { AccountsManager } from './components/AccountsManager';
 import { TagAnalysisModal } from './components/TagAnalysisModal';
 import { ExpenseTracker } from './components/ExpenseTracker';
+import { TransactionsView } from './components/TransactionsView';
 import { BabyStepsTracker } from './components/BabyStepsTracker';
 import { DebtSnowballManager } from './components/DebtSnowballManager';
 import { PaydayCalendarModal } from './components/PaydayCalendarModal';
@@ -78,6 +80,7 @@ import { AccountModal } from './components/modals/AccountModal';
 import { PeriodModal } from './components/modals/PeriodModal';
 import { EditPeriodModal } from './components/modals/EditPeriodModal';
 import { AccountTransferModal } from './components/modals/AccountTransferModal';
+import { WorkspaceSelectorModal } from './components/modals/WorkspaceSelectorModal';
 import { AtmCashDepositModal } from './components/modals/AtmCashDepositModal';
 import { EmergencyFundModal } from './components/modals/EmergencyFundModal';
 import { DebtModal } from './components/modals/DebtModal';
@@ -97,7 +100,14 @@ import {
 } from 'lucide-react';
 
 function BakayiseAppContent() {
-  const { user, member, isAuthorized, loading: authLoading } = useAuth();
+  const { user, member, isAuthorized, loading: authLoading, activeWorkspaceId, workspaces } = useAuth();
+
+  // Auto-open workspace selector if none active
+  useEffect(() => {
+    if (isAuthorized && !activeWorkspaceId && !authLoading && workspaces.length > 0) {
+      setIsWorkspaceModalOpen(true);
+    }
+  }, [isAuthorized, activeWorkspaceId, authLoading, workspaces.length]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('budget');
   const [loading, setLoading] = useState<boolean>(true);
   const [isIPhoneFrameMode, setIsIPhoneFrameMode] = useState<boolean>(false);
@@ -135,6 +145,7 @@ function BakayiseAppContent() {
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
 
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [transferSourceAccountId, setTransferSourceAccountId] = useState<string | undefined>(undefined);
 
   const [isAtmDepositModalOpen, setIsAtmDepositModalOpen] = useState(false);
@@ -167,13 +178,12 @@ function BakayiseAppContent() {
 
   // Subscribe to Periods, Debts, Accounts, BabySteps, EmergencyLogs, ArchivedWorksheets
   useEffect(() => {
-    if (!isAuthorized) return;
+    if (!isAuthorized || !activeWorkspaceId) return;
 
-    const unsubPeriods = subscribeToBudgetPeriods((loadedPeriods) => {
+    const unsubPeriods = subscribeToBudgetPeriods(activeWorkspaceId, (loadedPeriods) => {
       setPeriods(loadedPeriods);
       if (loadedPeriods.length > 0) {
         const todayStr = new Date().toISOString().split('T')[0];
-        // Default to cycle where current date falls within range (startDate <= today <= endDate)
         const currentByDate = loadedPeriods.find(
           (p) => p.startDate <= todayStr && todayStr <= p.endDate
         );
@@ -190,23 +200,23 @@ function BakayiseAppContent() {
       }
     });
 
-    const unsubDebts = subscribeToDebts((loadedDebts) => {
+    const unsubDebts = subscribeToDebts(activeWorkspaceId, (loadedDebts) => {
       setDebts(loadedDebts);
     });
 
-    const unsubAccounts = subscribeToAccounts((loadedAccounts) => {
+    const unsubAccounts = subscribeToAccounts(activeWorkspaceId, (loadedAccounts) => {
       setAccounts(loadedAccounts);
     });
 
-    const unsubBaby = subscribeToBabyStepsState((loadedState) => {
+    const unsubBaby = subscribeToBabyStepsState(activeWorkspaceId, (loadedState) => {
       setBabyState(loadedState);
     });
 
-    const unsubLogs = subscribeToEmergencyFundLogs((loadedLogs) => {
+    const unsubLogs = subscribeToEmergencyFundLogs(activeWorkspaceId, (loadedLogs) => {
       setEmergencyLogs(loadedLogs);
     });
 
-    const unsubArchives = subscribeToArchivedWorksheets((loadedArchives) => {
+    const unsubArchives = subscribeToArchivedWorksheets(activeWorkspaceId, (loadedArchives) => {
       setArchivedWorksheets(loadedArchives);
     });
 
@@ -218,7 +228,7 @@ function BakayiseAppContent() {
       unsubLogs();
       unsubArchives();
     };
-  }, [selectedPeriodId, isAuthorized]);
+  }, [selectedPeriodId, isAuthorized, activeWorkspaceId]);
 
   // Current active period object
   const currentPeriod = useMemo(() => {
@@ -236,17 +246,17 @@ function BakayiseAppContent() {
 
   // Subscribe to Incomes, Categories, and Expenses for the selected period
   useEffect(() => {
-    if (!isAuthorized || !currentPeriod) return;
+    if (!isAuthorized || !currentPeriod || !activeWorkspaceId) return;
 
-    const unsubIncomes = subscribeToIncomes(currentPeriod.id, (loadedIncomes) => {
+    const unsubIncomes = subscribeToIncomes(currentPeriod.id, activeWorkspaceId, (loadedIncomes) => {
       setIncomes(loadedIncomes);
     });
 
-    const unsubCategories = subscribeToCategories(currentPeriod.id, (loadedCats) => {
+    const unsubCategories = subscribeToCategories(currentPeriod.id, activeWorkspaceId, (loadedCats) => {
       setCategories(loadedCats);
     });
 
-    const unsubExpenses = subscribeToExpenses(currentPeriod.id, (loadedExpenses) => {
+    const unsubExpenses = subscribeToExpenses(currentPeriod.id, activeWorkspaceId, (loadedExpenses) => {
       setExpenses(loadedExpenses);
     });
 
@@ -255,7 +265,7 @@ function BakayiseAppContent() {
       unsubCategories();
       unsubExpenses();
     };
-  }, [currentPeriod?.id, isAuthorized]);
+  }, [currentPeriod?.id, isAuthorized, activeWorkspaceId]);
 
   // Total income calculation
   const totalPlannedIncome = useMemo(() => {
@@ -277,6 +287,16 @@ function BakayiseAppContent() {
       .filter((d) => d.status !== 'paid_off')
       .reduce((sum, d) => sum + d.balance, 0);
   }, [debts]);
+
+  const totalBankBalance = useMemo(() => {
+    return accounts.reduce((sum, acc) => {
+      // Only count positive asset accounts for "total bank balance"
+      if (acc.type === 'cheque' || acc.type === 'savings' || acc.type === 'cash' || acc.type === 'tax_free' || acc.type === 'investment' || acc.type === 'other') {
+        return sum + (acc.openingBalance || 0);
+      }
+      return sum;
+    }, 0);
+  }, [accounts]);
 
   const unassigned = totalPlannedIncome - totalAllocated;
 
@@ -539,13 +559,14 @@ function BakayiseAppContent() {
   }) => {
     const sourceAcc = accounts.find((a) => a.id === transferData.sourceAccountId);
     const destAcc = accounts.find((a) => a.id === transferData.destinationAccountId);
-    if (!sourceAcc || !destAcc || !currentPeriod) return;
+    if (!sourceAcc || !destAcc || !currentPeriod || !activeWorkspaceId) return;
 
     const timestamp = Date.now();
     const dateStr = transferData.date || new Date().toISOString().split('T')[0];
+    const transferId = `transfer_${timestamp}_${Math.random().toString(36).substring(2, 7)}`;
 
     const transferExpense: Expense = {
-      id: `exp_transfer_${timestamp}`,
+      id: `exp_${transferId}`,
       periodId: currentPeriod.id,
       categoryId: categories[0]?.id || 'cat_transfer',
       amount: transferData.amount,
@@ -555,12 +576,14 @@ function BakayiseAppContent() {
       paymentMethod: sourceAcc.type === 'cash' ? 'cash' : 'electronic_transfer',
       accountId: sourceAcc.id,
       notes: transferData.notes,
+      transferId: transferId,
+      householdId: activeWorkspaceId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     const transferIncome: Income = {
-      id: `inc_transfer_${timestamp}`,
+      id: `inc_${transferId}`,
       periodId: currentPeriod.id,
       title: `Transfer from ${sourceAcc.name}${transferData.reference ? `: ${transferData.reference}` : ''}`,
       amount: transferData.amount,
@@ -570,12 +593,13 @@ function BakayiseAppContent() {
       receivedDate: dateStr,
       accountId: destAcc.id,
       notes: transferData.notes,
+      transferId: transferId,
+      householdId: activeWorkspaceId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    await saveExpense(transferExpense);
-    await saveIncome(transferIncome);
+    await executeTransfer(transferExpense, transferIncome);
   };
 
   const handleExecuteDeposit = async (depositData: {
@@ -633,6 +657,45 @@ function BakayiseAppContent() {
     await saveIncome(depositIncome);
   };
 
+  const handleCopyToCycle = async (item: BudgetCategory | Income, targetPeriodId: string) => {
+    const timestamp = Date.now();
+    const newId = `${'group' in item ? 'cat' : 'inc'}_${targetPeriodId}_${timestamp}`;
+
+    if ('group' in item) {
+      const clonedCat: BudgetCategory = {
+        ...item,
+        id: newId,
+        periodId: targetPeriodId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await saveCategory(clonedCat);
+    } else {
+      const clonedInc: Income = {
+        ...item,
+        id: newId,
+        periodId: targetPeriodId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await saveIncome(clonedInc);
+    }
+  };
+
+  const handleCopyWholeCycle = async (targetPeriodId: string) => {
+    if (!currentPeriod || !activeWorkspaceId) return;
+    
+    // Copy all incomes
+    for (const inc of incomes) {
+      await handleCopyToCycle(inc, targetPeriodId);
+    }
+    
+    // Copy all categories
+    for (const cat of categories) {
+      await handleCopyToCycle(cat, targetPeriodId);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -644,7 +707,8 @@ function BakayiseAppContent() {
   }) => {
     setLoading(true);
     try {
-      const newPeriodId = await resetWorksheetToScratch(currentPeriod?.id, options);
+      if (!activeWorkspaceId) return;
+      const newPeriodId = await resetWorksheetToScratch(activeWorkspaceId, options);
       setSelectedPeriodId(newPeriodId);
     } catch (err) {
       console.error('Error resetting worksheet to scratch:', err);
@@ -666,7 +730,7 @@ function BakayiseAppContent() {
   };
 
   if (authLoading) {
-    return (
+  return (
       <div className="min-h-screen bg-[#0C0C0E] flex flex-col items-center justify-center text-slate-200 p-4">
         <Loader2 className="w-10 h-10 animate-spin text-[#30D158] mb-3" />
         <h2 className="text-base font-bold text-white">Verifying Google Account...</h2>
@@ -705,6 +769,7 @@ function BakayiseAppContent() {
           onOpenNavMenu={() => setIsNavMenuOpen(true)}
           step1Balance={babyState?.step1CurrentBalance}
           totalDebtBalance={totalDebtBalance}
+          totalBankBalance={totalBankBalance}
           unassignedAmount={unassigned}
           currentStep={babyState?.currentStep || 1}
           isIPhoneFrameMode={isIPhoneFrameMode}
@@ -733,6 +798,7 @@ function BakayiseAppContent() {
           onOpenPeriodModal={() => setIsPeriodModalOpen(true)}
           onOpenTagAnalysis={() => setIsTagAnalysisModalOpen(true)}
           onOpenCalendarModal={() => setIsCalendarModalOpen(true)}
+          onOpenWorkspaceModal={() => setIsWorkspaceModalOpen(true)}
           onOpenArchivedWorksheets={() => setIsArchivedWorksheetsModalOpen(true)}
           onExportJSON={handleExportJSON}
           onPrint={handlePrint}
@@ -766,6 +832,7 @@ function BakayiseAppContent() {
               incomes={incomes}
               expenses={expenses}
               accounts={accounts}
+              periods={periods}
               currentPeriod={currentPeriod}
               onOpenAddCategoryModal={() => {
                 setEditingCategory(null);
@@ -791,7 +858,10 @@ function BakayiseAppContent() {
                 setIsIncomeModalOpen(true);
               }}
               onUpdateIncome={handleUpdateIncome}
-              onDeleteIncome={(incId) => deleteIncome(incId)}
+              onDeleteIncome={(incId) => {
+                const inc = incomes.find((i) => i.id === incId);
+                deleteIncome(incId, inc?.transferId);
+              }}
               onInsertIncomeAt={handleInsertIncomeAt}
               onDuplicateIncome={handleDuplicateIncome}
               onReorderIncomes={handleReorderIncomes}
@@ -813,6 +883,8 @@ function BakayiseAppContent() {
                 setIsAccountModalOpen(true);
               }}
               onOpenEditPeriodModal={() => setIsEditPeriodModalOpen(true)}
+              onCopyToCycle={handleCopyToCycle}
+              onCopyWholeCycle={handleCopyWholeCycle}
             />
           )}
 
@@ -831,7 +903,27 @@ function BakayiseAppContent() {
                 setEditingExpense(exp);
                 setIsExpenseModalOpen(true);
               }}
-              onDeleteExpense={(expId) => deleteExpense(expId)}
+              onDeleteExpense={(expId) => {
+                const exp = expenses.find((e) => e.id === expId);
+                deleteExpense(expId, exp?.transferId);
+              }}
+            />
+          )}
+
+          {activeTab === 'transactions' && (
+            <TransactionsView
+              expenses={expenses}
+              incomes={incomes}
+              accounts={accounts}
+              categories={categories}
+              onDeleteExpense={(id) => {
+                const exp = expenses.find((e) => e.id === id);
+                deleteExpense(id, exp?.transferId);
+              }}
+              onDeleteIncome={(id) => {
+                const inc = incomes.find((i) => i.id === id);
+                deleteIncome(id, inc?.transferId);
+              }}
             />
           )}
 
@@ -879,15 +971,19 @@ function BakayiseAppContent() {
               categories={categories}
               emergencyLogs={emergencyLogs}
               accounts={accounts}
+              incomes={incomes}
+              expenses={expenses}
+              currentPeriod={currentPeriod}
               onOpenEmergencyModal={(step) => {
                 setEmergencyModalStep(step);
                 setIsEmergencyModalOpen(true);
               }}
               onUpdateCurrentStep={(stepNumber) => {
-                if (babyState) {
+                if (babyState && activeWorkspaceId) {
                   saveBabyStepsState({
                     ...babyState,
                     currentStep: stepNumber,
+                    householdId: activeWorkspaceId,
                     updatedAt: new Date().toISOString(),
                   });
                 }
@@ -1015,6 +1111,11 @@ function BakayiseAppContent() {
           initialIncome={editingIncome}
         />
 
+        <WorkspaceSelectorModal
+          isOpen={isWorkspaceModalOpen}
+          onClose={() => setIsWorkspaceModalOpen(false)}
+        />
+
         <CategoryModal
           isOpen={isCategoryModalOpen}
           onClose={() => {
@@ -1090,8 +1191,13 @@ function BakayiseAppContent() {
           currentState={babyState}
           categories={categories}
           onSaveLogs={async (updatedState, newLog) => {
-            await saveBabyStepsState(updatedState);
-            await addEmergencyFundLog(newLog);
+            if (activeWorkspaceId) {
+              await saveBabyStepsState({
+                ...updatedState,
+                householdId: activeWorkspaceId
+              });
+              await addEmergencyFundLog(newLog);
+            }
           }}
         />
 

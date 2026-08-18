@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   setDoc,
   updateDoc,
@@ -24,6 +25,7 @@ import {
   FinancialAccount,
   ArchivedWorksheet,
   UserProfile,
+  Workspace,
 } from '../types';
 import {
   DEFAULT_SOUTH_AFRICAN_CATEGORIES,
@@ -159,6 +161,7 @@ async function syncAccountDebt(account: FinancialAccount): Promise<void> {
 // Financial Accounts (Cheque, Savings, TFSA, Credit, Cash)
 // ----------------------------------------------------
 export function subscribeToAccounts(
+  householdId: string,
   onData: (accounts: FinancialAccount[]) => void,
   onError?: (err: Error) => void
 ) {
@@ -168,7 +171,16 @@ export function subscribeToAccounts(
     (snapshot) => {
       const accounts: FinancialAccount[] = [];
       snapshot.forEach((docSnap) => {
-        accounts.push({ ...(docSnap.data() as FinancialAccount), id: docSnap.id });
+        const data = docSnap.data() as FinancialAccount;
+        if (
+          !data.householdId ||
+          data.householdId === householdId ||
+          data.workspaceId === householdId ||
+          data.householdId === 'shared_family_workspace' ||
+          data.householdId === 'main'
+        ) {
+          accounts.push({ ...(data as FinancialAccount), id: docSnap.id });
+        }
       });
       // Sort default account first, then by name
       accounts.sort((a, b) => {
@@ -296,6 +308,7 @@ export async function batchUpdateIncomeOrders(
 // Budget Periods
 // ----------------------------------------------------
 export function subscribeToBudgetPeriods(
+  householdId: string,
   onData: (periods: BudgetPeriod[]) => void,
   onError?: (err: Error) => void
 ) {
@@ -305,10 +318,20 @@ export function subscribeToBudgetPeriods(
     (snapshot) => {
       const periods: BudgetPeriod[] = [];
       snapshot.forEach((docSnap) => {
-        periods.push({ ...(docSnap.data() as BudgetPeriod), id: docSnap.id });
+        const data = docSnap.data() as BudgetPeriod;
+        // Include period if it belongs to this workspace OR if it's unassigned/legacy shared
+        if (
+          !data.householdId ||
+          data.householdId === householdId ||
+          data.workspaceId === householdId ||
+          data.householdId === 'shared_family_workspace' ||
+          data.householdId === 'main'
+        ) {
+          periods.push({ ...(data as BudgetPeriod), id: docSnap.id });
+        }
       });
-      // Sort by startDate descending
-      periods.sort((a, b) => b.startDate.localeCompare(a.startDate));
+      // Sort by startDate descending (latest first)
+      periods.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
       onData(periods);
     },
     (error) => {
@@ -436,11 +459,15 @@ export async function deleteBudgetPeriod(periodId: string): Promise<void> {
 // ----------------------------------------------------
 export function subscribeToIncomes(
   periodId: string,
+  householdId: string,
   onData: (incomes: Income[]) => void,
   onError?: (err: Error) => void
 ) {
   const colRef = collection(db, 'incomes');
-  const q = query(colRef, where('periodId', '==', periodId));
+  const q = query(
+    colRef, 
+    where('periodId', '==', periodId)
+  );
   return onSnapshot(
     q,
     (snapshot) => {
@@ -482,10 +509,22 @@ export async function saveIncome(income: Income): Promise<void> {
   }
 }
 
-export async function deleteIncome(incomeId: string): Promise<void> {
+export async function deleteIncome(incomeId: string, transferId?: string): Promise<void> {
   const path = `incomes/${incomeId}`;
   try {
-    await deleteDoc(doc(db, 'incomes', incomeId));
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'incomes', incomeId));
+
+    if (transferId) {
+      // Find the linked expense
+      const q = query(collection(db, 'expenses'), where('transferId', '==', transferId));
+      const snap = await getDocs(q);
+      snap.forEach((d) => {
+        batch.delete(d.ref);
+      });
+    }
+
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -513,11 +552,15 @@ export async function updateIncome(incomeId: string, updates: Partial<Income>): 
 // ----------------------------------------------------
 export function subscribeToCategories(
   periodId: string,
+  householdId: string,
   onData: (categories: BudgetCategory[]) => void,
   onError?: (err: Error) => void
 ) {
   const colRef = collection(db, 'budget_categories');
-  const q = query(colRef, where('periodId', '==', periodId));
+  const q = query(
+    colRef, 
+    where('periodId', '==', periodId)
+  );
   return onSnapshot(
     q,
     (snapshot) => {
@@ -590,11 +633,15 @@ export async function deleteCategory(categoryId: string): Promise<void> {
 // ----------------------------------------------------
 export function subscribeToExpenses(
   periodId: string,
+  householdId: string,
   onData: (expenses: Expense[]) => void,
   onError?: (err: Error) => void
 ) {
   const colRef = collection(db, 'expenses');
-  const q = query(colRef, where('periodId', '==', periodId));
+  const q = query(
+    colRef, 
+    where('periodId', '==', periodId)
+  );
   return onSnapshot(
     q,
     (snapshot) => {
@@ -672,12 +719,42 @@ export async function updateExpense(expenseId: string, updates: Partial<Expense>
   }
 }
 
-export async function deleteExpense(expenseId: string): Promise<void> {
+export async function deleteExpense(expenseId: string, transferId?: string): Promise<void> {
   const path = `expenses/${expenseId}`;
   try {
-    await deleteDoc(doc(db, 'expenses', expenseId));
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'expenses', expenseId));
+
+    if (transferId) {
+      // Find the linked income
+      const q = query(collection(db, 'incomes'), where('transferId', '==', transferId));
+      const snap = await getDocs(q);
+      snap.forEach((d) => {
+        batch.delete(d.ref);
+      });
+    }
+
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function executeTransfer(expense: Expense, income: Income): Promise<void> {
+  const path = 'transfers/execute';
+  try {
+    const batch = writeBatch(db);
+    const audit = getAuditFields(expense.householdId);
+
+    const expenseRef = doc(db, 'expenses', expense.id);
+    const incomeRef = doc(db, 'incomes', income.id);
+
+    batch.set(expenseRef, cleanFirestoreObject({ ...expense, ...audit }));
+    batch.set(incomeRef, cleanFirestoreObject({ ...income, ...audit }));
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
@@ -685,6 +762,7 @@ export async function deleteExpense(expenseId: string): Promise<void> {
 // Debts (Baby Step 2)
 // ----------------------------------------------------
 export function subscribeToDebts(
+  householdId: string,
   onData: (debts: Debt[]) => void,
   onError?: (err: Error) => void
 ) {
@@ -694,7 +772,16 @@ export function subscribeToDebts(
     (snapshot) => {
       const debts: Debt[] = [];
       snapshot.forEach((docSnap) => {
-        debts.push({ ...(docSnap.data() as Debt), id: docSnap.id });
+        const data = docSnap.data() as Debt;
+        if (
+          !data.householdId ||
+          data.householdId === householdId ||
+          data.workspaceId === householdId ||
+          data.householdId === 'shared_family_workspace' ||
+          data.householdId === 'main'
+        ) {
+          debts.push({ ...(data as Debt), id: docSnap.id });
+        }
       });
       // Sort smallest balance to largest for the Debt Snowball method
       debts.sort((a, b) => {
@@ -759,39 +846,53 @@ export async function deleteDebt(debtId: string): Promise<void> {
 // Baby Steps State
 // ----------------------------------------------------
 export function subscribeToBabyStepsState(
+  householdId: string,
   onData: (state: BabyStepsState | null) => void,
   onError?: (err: Error) => void
 ) {
-  const docRef = doc(db, 'baby_steps_state', 'main');
+  const docRef = doc(db, 'baby_steps_state', householdId);
   return onSnapshot(
     docRef,
-    (snapshot) => {
+    async (snapshot) => {
       if (snapshot.exists()) {
         onData(snapshot.data() as BabyStepsState);
       } else {
+        // Fallback to shared_family_workspace or main
+        try {
+          const fallbackSnap = await getDoc(doc(db, 'baby_steps_state', 'shared_family_workspace'));
+          if (fallbackSnap.exists()) {
+            onData(fallbackSnap.data() as BabyStepsState);
+            return;
+          }
+          const mainSnap = await getDoc(doc(db, 'baby_steps_state', 'main'));
+          if (mainSnap.exists()) {
+            onData(mainSnap.data() as BabyStepsState);
+            return;
+          }
+        } catch {
+          // Ignore fallback error
+        }
         onData(null);
       }
     },
     (error) => {
       if (onError) onError(error);
-      console.warn('Firestore onSnapshot error [baby_steps_state/main]:', error.message);
+      console.warn(`Firestore onSnapshot error [baby_steps_state/${householdId}]:`, error.message);
     }
   );
 }
 
 export async function saveBabyStepsState(state: BabyStepsState): Promise<void> {
-  const path = 'baby_steps_state/main';
+  const householdId = state.householdId || 'shared_family_workspace';
+  const path = `baby_steps_state/${householdId}`;
   try {
-    const audit = getAuditFields();
-    await setDoc(
-      doc(db, 'baby_steps_state', 'main'),
-      cleanFirestoreObject({
-        ...state,
-        lastEditedBy: state.lastEditedBy || audit.lastEditedBy,
-        lastEditedByEmail: state.lastEditedByEmail || audit.lastEditedByEmail,
-        lastEditedAt: audit.lastEditedAt,
-      })
-    );
+    const audit = getAuditFields(householdId);
+    await setDoc(doc(db, 'baby_steps_state', householdId), cleanFirestoreObject({
+      ...state,
+      householdId, // Ensure it's stored
+      ...audit,
+      updatedAt: new Date().toISOString()
+    }));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -801,6 +902,7 @@ export async function saveBabyStepsState(state: BabyStepsState): Promise<void> {
 // Emergency Fund Logs
 // ----------------------------------------------------
 export function subscribeToEmergencyFundLogs(
+  householdId: string,
   onData: (logs: EmergencyFundLog[]) => void,
   onError?: (err: Error) => void
 ) {
@@ -810,7 +912,16 @@ export function subscribeToEmergencyFundLogs(
     (snapshot) => {
       const logs: EmergencyFundLog[] = [];
       snapshot.forEach((docSnap) => {
-        logs.push({ ...(docSnap.data() as EmergencyFundLog), id: docSnap.id });
+        const data = docSnap.data() as EmergencyFundLog;
+        if (
+          !data.householdId ||
+          data.householdId === householdId ||
+          data.workspaceId === householdId ||
+          data.householdId === 'shared_family_workspace' ||
+          data.householdId === 'main'
+        ) {
+          logs.push({ ...(data as EmergencyFundLog), id: docSnap.id });
+        }
       });
       logs.sort((a, b) => b.date.localeCompare(a.date));
       onData(logs);
@@ -1297,48 +1408,37 @@ export async function seedFamilyData(): Promise<string> {
  * Keeps banking accounts ready so that when the user adds incomes and categories, they can immediately link them to accounts.
  */
 export async function resetWorksheetToScratch(
-  periodIdOrOptions?:
-    | string
-    | {
-        resetAccountsToCleanDefaults?: boolean;
-        clearDebts?: boolean;
-        clearEmergencyLogs?: boolean;
-      },
-  maybeOptions?: {
+  householdId: string,
+  options?: {
     resetAccountsToCleanDefaults?: boolean;
     clearDebts?: boolean;
     clearEmergencyLogs?: boolean;
   }
 ): Promise<string> {
-  const currentPeriodId = typeof periodIdOrOptions === 'string' ? periodIdOrOptions : undefined;
-  const options =
-    typeof periodIdOrOptions === 'object' && periodIdOrOptions !== null
-      ? periodIdOrOptions
-      : maybeOptions;
-
   const batch = writeBatch(db);
+  const audit = getAuditFields(householdId);
 
-  // 1. Delete all expenses
-  const expensesSnap = await getDocs(collection(db, 'expenses'));
+  // 1. Delete expenses in this workspace
+  const expensesSnap = await getDocs(query(collection(db, 'expenses'), where('householdId', '==', householdId)));
   expensesSnap.forEach((docSnap) => {
     batch.delete(doc(db, 'expenses', docSnap.id));
   });
 
-  // 2. Delete all categories
-  const catSnap = await getDocs(collection(db, 'budget_categories'));
+  // 2. Delete categories in this workspace
+  const catSnap = await getDocs(query(collection(db, 'budget_categories'), where('householdId', '==', householdId)));
   catSnap.forEach((docSnap) => {
     batch.delete(doc(db, 'budget_categories', docSnap.id));
   });
 
-  // 3. Delete all incomes
-  const incSnap = await getDocs(collection(db, 'incomes'));
+  // 3. Delete incomes in this workspace
+  const incSnap = await getDocs(query(collection(db, 'incomes'), where('householdId', '==', householdId)));
   incSnap.forEach((docSnap) => {
     batch.delete(doc(db, 'incomes', docSnap.id));
   });
 
   // 4. Reset debts if requested
   if (options?.clearDebts) {
-    const debtSnap = await getDocs(collection(db, 'debts'));
+    const debtSnap = await getDocs(query(collection(db, 'debts'), where('householdId', '==', householdId)));
     debtSnap.forEach((docSnap) => {
       batch.delete(doc(db, 'debts', docSnap.id));
     });
@@ -1346,16 +1446,17 @@ export async function resetWorksheetToScratch(
 
   // 5. Reset emergency fund logs if requested
   if (options?.clearEmergencyLogs) {
-    const efSnap = await getDocs(collection(db, 'emergency_fund_logs'));
+    const efSnap = await getDocs(query(collection(db, 'emergency_fund_logs'), where('householdId', '==', householdId)));
     efSnap.forEach((docSnap) => {
       batch.delete(doc(db, 'emergency_fund_logs', docSnap.id));
     });
   }
 
-  // 6. Reset baby steps state to Step 1
-  const babyStateDoc = doc(db, 'baby_steps_state', 'main');
+  // 6. Reset baby steps state for this workspace
+  const babyStateDoc = doc(db, 'baby_steps_state', householdId);
   batch.set(babyStateDoc, {
-    id: 'main',
+    ...audit,
+    id: householdId,
     currentStep: 1,
     step1EmergencyFundTarget: 20000,
     step1CurrentBalance: 0,
@@ -1370,17 +1471,17 @@ export async function resetWorksheetToScratch(
     updatedAt: new Date().toISOString(),
   });
 
-  // 7. Ensure standard financial accounts exist with clean balances
-  const accSnap = await getDocs(collection(db, 'financial_accounts'));
-  if (accSnap.empty || options?.resetAccountsToCleanDefaults) {
-    if (options?.resetAccountsToCleanDefaults) {
-      accSnap.forEach((docSnap) => {
-        batch.delete(doc(db, 'financial_accounts', docSnap.id));
-      });
-    }
+  // 7. Reset accounts if requested
+  if (options?.resetAccountsToCleanDefaults) {
+    const accSnap = await getDocs(query(collection(db, 'financial_accounts'), where('householdId', '==', householdId)));
+    accSnap.forEach((docSnap) => {
+      batch.delete(doc(db, 'financial_accounts', docSnap.id));
+    });
+    
     const cleanAccounts: FinancialAccount[] = DEFAULT_STARTER_ACCOUNTS.map((acc, index) => ({
       ...acc,
-      id: `acc_${index + 1}`,
+      ...audit,
+      id: `acc_${householdId}_${index + 1}`,
       openingBalance: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1390,30 +1491,38 @@ export async function resetWorksheetToScratch(
     }
   }
 
-  // 8. Ensure active period exists and is cleared to R0 totals
+  // 8. Ensure active period exists for this workspace
   const now = new Date();
   const year = now.getFullYear();
-  const month = now.getMonth();
-  const periodInfo = generatePayPeriodInfo(year, month);
-  const targetPeriodId = currentPeriodId || `period_${year}_${month + 1}`;
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const monthName = monthNames[now.getMonth()];
+  const periodId = `period_${householdId}_${year}_${now.getMonth() + 1}`;
+  
+  const startStr = new Date(year, now.getMonth(), 25).toISOString().split('T')[0];
+  const endStr = new Date(year, now.getMonth() + 1, 24).toISOString().split('T')[0];
 
-  const cleanPeriod: BudgetPeriod = {
-    id: targetPeriodId,
-    name: periodInfo.periodName,
-    startDate: periodInfo.startDate,
-    endDate: periodInfo.endDate,
-    setupDueDate: periodInfo.setupDueDate,
+  const initialPeriod: BudgetPeriod = {
+    ...audit,
+    id: periodId,
+    name: `${monthName} ${year} Cycle`,
+    startDate: startStr,
+    endDate: endStr,
+    setupDueDate: startStr,
     status: 'active',
     totalPlannedIncome: 0,
     totalPlannedExpenses: 0,
-    notes: 'Clean zero-based budget worksheet. Start adding your incomes and budget envelopes.',
+    notes: 'Initial starting period for new worksheet.',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  batch.set(doc(db, 'budget_periods', targetPeriodId), cleanPeriod);
 
+  batch.set(doc(db, 'budget_periods', periodId), initialPeriod);
   await batch.commit();
-  return targetPeriodId;
+
+  return periodId;
 }
 
 /**
@@ -1565,12 +1674,14 @@ export async function archiveCurrentWorksheet(customTitle?: string, notes?: stri
  * Subscribes to saved worksheet archives in Firestore
  */
 export function subscribeToArchivedWorksheets(
+  householdId: string,
   onData: (archives: ArchivedWorksheet[]) => void,
   onError?: (err: Error) => void
 ) {
   const colRef = collection(db, 'archived_worksheets');
+  const q = query(colRef, where('householdId', '==', householdId));
   return onSnapshot(
-    colRef,
+    q,
     (snapshot) => {
       const archives: ArchivedWorksheet[] = [];
       snapshot.forEach((docSnap) => {
@@ -1630,7 +1741,8 @@ export async function restoreArchivedWorksheet(archive: ArchivedWorksheet): Prom
   }
 
   if (snapshot.babyStepsState) {
-    batch.set(doc(db, 'baby_steps_state', 'main'), cleanFirestoreObject(snapshot.babyStepsState));
+    const babyId = snapshot.babyStepsState.householdId || 'shared_family_workspace';
+    batch.set(doc(db, 'baby_steps_state', babyId), cleanFirestoreObject(snapshot.babyStepsState));
   }
 
   await batch.commit();
@@ -1642,5 +1754,861 @@ export async function restoreArchivedWorksheet(archive: ArchivedWorksheet): Prom
 export async function deleteArchivedWorksheet(archiveId: string): Promise<void> {
   await deleteDoc(doc(db, 'archived_worksheets', archiveId));
 }
+
+// ----------------------------------------------------
+// Workspaces & Multi-User Collaboration
+// ----------------------------------------------------
+
+export interface UserWorkspacesResult {
+  joined: Workspace[];
+  availablePublic: Workspace[];
+}
+
+/**
+ * Fetches all workspaces for a user:
+ * - joined: Workspaces where user is in memberIds
+ * - availablePublic: Non-private workspaces where user is NOT yet in memberIds (can be joined/accessed)
+ */
+export async function fetchAllUserWorkspaces(userId: string): Promise<UserWorkspacesResult> {
+  try {
+    const snap = await getDocs(collection(db, 'workspaces'));
+    const joined: Workspace[] = [];
+    const availablePublic: Workspace[] = [];
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as Workspace;
+      const ws: Workspace = { ...data, id: docSnap.id };
+      const isMember = Array.isArray(ws.memberIds) && ws.memberIds.includes(userId);
+
+      if (isMember) {
+        joined.push(ws);
+      } else if (ws.isPrivate !== true) {
+        // Public / shared family workspace
+        availablePublic.push(ws);
+      }
+    });
+
+    // Sort joined by updatedAt descending
+    joined.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+    availablePublic.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+
+    return { joined, availablePublic };
+  } catch (err) {
+    console.error('Error fetching all user workspaces:', err);
+    return { joined: [], availablePublic: [] };
+  }
+}
+
+/**
+ * Joins a public / family workspace by adding the user to memberIds
+ */
+export async function joinWorkspaceById(workspaceId: string, user: { uid: string; displayName?: string | null; email?: string | null }): Promise<void> {
+  const wsRef = doc(db, 'workspaces', workspaceId);
+  const snap = await getDoc(wsRef);
+  if (!snap.exists()) {
+    throw new Error('Workspace not found.');
+  }
+
+  const data = snap.data() as Workspace;
+  const currentMembers = Array.isArray(data.memberIds) ? data.memberIds : [];
+  if (!currentMembers.includes(user.uid)) {
+    await updateDoc(wsRef, {
+      memberIds: [...currentMembers, user.uid],
+      updatedAt: new Date().toISOString(),
+      lastEditedBy: user.displayName || 'User',
+      lastEditedByEmail: user.email || '',
+      lastEditedAt: new Date().toISOString(),
+    });
+  }
+}
+
+/**
+ * Toggles a workspace between Private and Public
+ */
+export async function toggleWorkspacePrivacy(
+  workspaceId: string,
+  isPrivate: boolean,
+  user: { displayName?: string | null; email?: string | null }
+): Promise<void> {
+  const wsRef = doc(db, 'workspaces', workspaceId);
+  await updateDoc(wsRef, {
+    isPrivate,
+    updatedAt: new Date().toISOString(),
+    lastEditedBy: user.displayName || 'User',
+    lastEditedByEmail: user.email || '',
+    lastEditedAt: new Date().toISOString(),
+  });
+}
+
+// ----------------------------------------------------
+// Unassigned Data Discovery & Wizard Linking
+// ----------------------------------------------------
+
+export interface BabyStepOption extends BabyStepsState {
+  docId: string;
+  isUnassigned?: boolean;
+}
+
+export interface BudgetPeriodOption extends BudgetPeriod {
+  isUnassigned?: boolean;
+  associatedIncomesCount?: number;
+  associatedExpensesCount?: number;
+  associatedCategoriesCount?: number;
+  originSource?: 'live_collection' | 'discovered_transactions' | 'archived_backup';
+  sourceArchiveId?: string;
+  sourceArchiveTitle?: string;
+  archivedIncomes?: Income[];
+  archivedCategories?: BudgetCategory[];
+  archivedExpenses?: Expense[];
+}
+
+export interface FinancialAccountOption extends FinancialAccount {
+  isUnassigned?: boolean;
+}
+
+export interface UnassignedDataDiscoveryResult {
+  babySteps: BabyStepOption[];
+  budgetPeriods: BudgetPeriodOption[];
+  accounts: FinancialAccountOption[];
+}
+
+/**
+ * Queries all Baby Steps, Budget Periods, and Financial Accounts from Firestore
+ * (including live collections, unassigned records, discovered transaction period IDs, and archived backups)
+ * and highlights their details so the user can easily review, select, and assign all data to a workspace.
+ */
+export async function fetchAllMigrationData(): Promise<UnassignedDataDiscoveryResult> {
+  const [
+    babySnap,
+    periodsSnap,
+    accountsSnap,
+    incomesSnap,
+    expensesSnap,
+    categoriesSnap,
+    debtsSnap,
+    logsSnap,
+    archivesSnap,
+  ] = await Promise.all([
+    getDocs(collection(db, 'baby_steps_state')),
+    getDocs(collection(db, 'budget_periods')),
+    getDocs(collection(db, 'financial_accounts')),
+    getDocs(collection(db, 'incomes')),
+    getDocs(collection(db, 'expenses')),
+    getDocs(collection(db, 'budget_categories')),
+    getDocs(collection(db, 'debts')),
+    getDocs(collection(db, 'emergency_fund_logs')),
+    getDocs(collection(db, 'archived_worksheets')),
+  ]);
+
+  // 1. Process Baby Steps
+  const babySteps: BabyStepOption[] = [];
+  babySnap.forEach((docSnap) => {
+    const data = docSnap.data() as BabyStepsState;
+    const docId = docSnap.id;
+    const isUnassigned =
+      !data.householdId ||
+      data.householdId === 'main' ||
+      data.householdId === 'shared_family_workspace' ||
+      !data.workspaceId;
+    babySteps.push({
+      ...data,
+      id: docId,
+      docId,
+      isUnassigned,
+    });
+  });
+
+  // Calculate totals and counts for periods from live transactions
+  const incomesByPeriod: Record<string, { count: number; total: number; earliestDate?: string; latestDate?: string }> = {};
+  incomesSnap.forEach((d) => {
+    const inc = d.data() as Income;
+    if (inc.periodId) {
+      if (!incomesByPeriod[inc.periodId]) {
+        incomesByPeriod[inc.periodId] = { count: 0, total: 0 };
+      }
+      incomesByPeriod[inc.periodId].count += 1;
+      incomesByPeriod[inc.periodId].total += Number(inc.amount || 0);
+      if (inc.receivedDate) {
+        if (!incomesByPeriod[inc.periodId].earliestDate || inc.receivedDate < incomesByPeriod[inc.periodId].earliestDate!) {
+          incomesByPeriod[inc.periodId].earliestDate = inc.receivedDate;
+        }
+      }
+    }
+  });
+
+  const expensesByPeriod: Record<string, { count: number; total: number }> = {};
+  expensesSnap.forEach((d) => {
+    const exp = d.data() as Expense;
+    if (exp.periodId) {
+      if (!expensesByPeriod[exp.periodId]) {
+        expensesByPeriod[exp.periodId] = { count: 0, total: 0 };
+      }
+      expensesByPeriod[exp.periodId].count += 1;
+      expensesByPeriod[exp.periodId].total += Number(exp.amount || 0);
+    }
+  });
+
+  const categoriesByPeriod: Record<string, { count: number; totalAllocated: number }> = {};
+  categoriesSnap.forEach((d) => {
+    const cat = d.data() as BudgetCategory;
+    if (cat.periodId) {
+      if (!categoriesByPeriod[cat.periodId]) {
+        categoriesByPeriod[cat.periodId] = { count: 0, totalAllocated: 0 };
+      }
+      categoriesByPeriod[cat.periodId].count += 1;
+      categoriesByPeriod[cat.periodId].totalAllocated += Number(cat.allocatedAmount || 0);
+    }
+  });
+
+  // 2. Process Budget Periods
+  const budgetPeriods: BudgetPeriodOption[] = [];
+  const processedPeriodIds = new Set<string>();
+
+  // A. Explicit documents from budget_periods collection
+  periodsSnap.forEach((docSnap) => {
+    const data = docSnap.data() as BudgetPeriod;
+    const pId = docSnap.id;
+    processedPeriodIds.add(pId);
+
+    const incInfo = incomesByPeriod[pId] || { count: 0, total: 0 };
+    const expInfo = expensesByPeriod[pId] || { count: 0, total: 0 };
+    const catInfo = categoriesByPeriod[pId] || { count: 0, totalAllocated: 0 };
+
+    const isUnassigned =
+      !data.householdId ||
+      data.householdId === 'shared_family_workspace' ||
+      data.householdId === 'main' ||
+      !data.workspaceId;
+
+    budgetPeriods.push({
+      ...data,
+      id: pId,
+      name: data.name || `Pay Cycle (${pId})`,
+      startDate: data.startDate || incInfo.earliestDate || '2026-01-25',
+      endDate: data.endDate || '2026-02-24',
+      setupDueDate: data.setupDueDate || data.startDate || incInfo.earliestDate || '2026-01-25',
+      status: data.status || 'active',
+      totalPlannedIncome: data.totalPlannedIncome || incInfo.total || 0,
+      totalPlannedExpenses: data.totalPlannedExpenses || catInfo.totalAllocated || expInfo.total || 0,
+      isUnassigned,
+      associatedIncomesCount: incInfo.count,
+      associatedExpensesCount: expInfo.count,
+      associatedCategoriesCount: catInfo.count,
+      originSource: 'live_collection',
+    });
+  });
+
+  // B. Discovered periods from incomes, expenses, or categories that may not have a dedicated budget_periods document
+  const allDiscoveredPeriodIds = new Set([
+    ...Object.keys(incomesByPeriod),
+    ...Object.keys(expensesByPeriod),
+    ...Object.keys(categoriesByPeriod),
+  ]);
+
+  allDiscoveredPeriodIds.forEach((pId) => {
+    if (!processedPeriodIds.has(pId) && pId.trim()) {
+      const incInfo = incomesByPeriod[pId] || { count: 0, total: 0 };
+      const expInfo = expensesByPeriod[pId] || { count: 0, total: 0 };
+      const catInfo = categoriesByPeriod[pId] || { count: 0, totalAllocated: 0 };
+
+      // Format a clean readable name from the period ID
+      let readableName = `Pay Cycle (${pId})`;
+      if (pId.includes('period_') || pId.includes('_')) {
+        const parts = pId.split('_');
+        const lastPart = parts[parts.length - 1];
+        const secondLast = parts[parts.length - 2];
+        if (!isNaN(Number(lastPart))) {
+          const monthNum = parseInt(lastPart, 10);
+          const monthNames = [
+            'January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December'
+          ];
+          const mName = monthNames[monthNum - 1] || `Month ${monthNum}`;
+          const year = !isNaN(Number(secondLast)) ? secondLast : '2026';
+          readableName = `${mName} ${year} Pay Cycle (${pId})`;
+        }
+      }
+
+      budgetPeriods.push({
+        id: pId,
+        name: readableName,
+        startDate: incInfo.earliestDate || '2026-01-25',
+        endDate: '2026-02-24',
+        setupDueDate: incInfo.earliestDate || '2026-01-25',
+        status: 'active',
+        totalPlannedIncome: incInfo.total,
+        totalPlannedExpenses: catInfo.totalAllocated || expInfo.total,
+        householdId: 'shared_family_workspace',
+        isUnassigned: true,
+        associatedIncomesCount: incInfo.count,
+        associatedExpensesCount: expInfo.count,
+        associatedCategoriesCount: catInfo.count,
+        originSource: 'discovered_transactions',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      processedPeriodIds.add(pId);
+    }
+  });
+
+  // C. Discovered periods and transactions from archived_worksheets
+  archivesSnap.forEach((docSnap) => {
+    const archive = docSnap.data() as ArchivedWorksheet;
+    const snap = archive.dataSnapshot;
+    if (snap && snap.periods && Array.isArray(snap.periods)) {
+      snap.periods.forEach((archPeriod) => {
+        const pId = archPeriod.id;
+        const archIncomes = (snap.incomes || []).filter((i) => i.periodId === pId);
+        const archCategories = (snap.categories || []).filter((c) => c.periodId === pId);
+        const archExpenses = (snap.expenses || []).filter((e) => e.periodId === pId);
+
+        const totalInc = archIncomes.reduce((acc, i) => acc + (Number(i.amount) || 0), 0);
+        const totalCat = archCategories.reduce((acc, c) => acc + (Number(c.allocatedAmount) || 0), 0);
+        const totalExp = archExpenses.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+
+        if (!processedPeriodIds.has(pId)) {
+          budgetPeriods.push({
+            ...archPeriod,
+            id: pId,
+            name: archPeriod.name || `Archived Period (${pId})`,
+            startDate: archPeriod.startDate || '2026-01-25',
+            endDate: archPeriod.endDate || '2026-02-24',
+            setupDueDate: archPeriod.setupDueDate || archPeriod.startDate || '2026-01-25',
+            status: archPeriod.status || 'archived',
+            totalPlannedIncome: archPeriod.totalPlannedIncome || totalInc,
+            totalPlannedExpenses: archPeriod.totalPlannedExpenses || totalCat || totalExp,
+            isUnassigned: true,
+            associatedIncomesCount: archIncomes.length,
+            associatedExpensesCount: archExpenses.length,
+            associatedCategoriesCount: archCategories.length,
+            originSource: 'archived_backup',
+            sourceArchiveId: docSnap.id,
+            sourceArchiveTitle: archive.title,
+            archivedIncomes: archIncomes,
+            archivedCategories: archCategories,
+            archivedExpenses: archExpenses,
+          });
+          processedPeriodIds.add(pId);
+        } else {
+          // If already in list but missing child counts, attach the archived records for restoration
+          const existing = budgetPeriods.find((p) => p.id === pId);
+          if (existing && (!existing.associatedIncomesCount || existing.associatedIncomesCount === 0)) {
+            existing.associatedIncomesCount = archIncomes.length;
+            existing.associatedCategoriesCount = archCategories.length;
+            existing.associatedExpensesCount = archExpenses.length;
+            existing.totalPlannedIncome = existing.totalPlannedIncome || totalInc;
+            existing.totalPlannedExpenses = existing.totalPlannedExpenses || totalCat || totalExp;
+            existing.sourceArchiveId = docSnap.id;
+            existing.sourceArchiveTitle = archive.title;
+            existing.archivedIncomes = archIncomes;
+            existing.archivedCategories = archCategories;
+            existing.archivedExpenses = archExpenses;
+          }
+        }
+      });
+    }
+  });
+
+  // Sort periods by start date descending so latest appears first
+  budgetPeriods.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+
+  // 3. Process Financial Accounts
+  const accounts: FinancialAccountOption[] = [];
+  accountsSnap.forEach((docSnap) => {
+    const data = docSnap.data() as FinancialAccount;
+    const isUnassigned =
+      !data.householdId ||
+      data.householdId === 'shared_family_workspace' ||
+      data.householdId === 'main' ||
+      !data.workspaceId;
+    accounts.push({
+      ...data,
+      id: docSnap.id,
+      isUnassigned,
+    });
+  });
+  accounts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  return { babySteps, budgetPeriods, accounts };
+}
+
+export interface CreateAndLinkWorkspaceParams {
+  workspace: {
+    name: string;
+    description?: string;
+    isPrivate: boolean;
+    ownerId: string;
+    ownerEmail: string;
+    ownerName: string;
+  };
+  selectedBabyStepDocId?: string | null;
+  createNewBabyStep?: boolean;
+  selectedPeriodIds: string[];
+  selectedAccountIds: string[];
+  discoveredPeriods?: BudgetPeriodOption[];
+}
+
+/**
+ * Creates a new Workspace and links the selected Baby Step, Budget Periods, child records, and Accounts
+ */
+export async function createWorkspaceAndLinkData(params: CreateAndLinkWorkspaceParams): Promise<Workspace> {
+  const newWorkspaceId = `ws_${Date.now()}`;
+  const now = new Date().toISOString();
+
+  // 1. Create Workspace Document
+  const newWs: Workspace = {
+    id: newWorkspaceId,
+    name: params.workspace.name.trim(),
+    description: params.workspace.description?.trim() || '',
+    isPrivate: params.workspace.isPrivate,
+    ownerId: params.workspace.ownerId,
+    memberIds: [params.workspace.ownerId],
+    householdId: newWorkspaceId,
+    workspaceId: newWorkspaceId,
+    userId: params.workspace.ownerId,
+    createdAt: now,
+    updatedAt: now,
+    lastEditedBy: params.workspace.ownerName,
+    lastEditedByEmail: params.workspace.ownerEmail,
+    lastEditedAt: now,
+  };
+
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'workspaces', newWorkspaceId), newWs);
+
+  // 2. Baby Step setup
+  if (params.selectedBabyStepDocId) {
+    const sourceSnap = await getDoc(doc(db, 'baby_steps_state', params.selectedBabyStepDocId));
+    if (sourceSnap.exists()) {
+      const sourceData = sourceSnap.data() as BabyStepsState;
+      batch.set(doc(db, 'baby_steps_state', newWorkspaceId), cleanFirestoreObject({
+        ...sourceData,
+        id: newWorkspaceId,
+        householdId: newWorkspaceId,
+        workspaceId: newWorkspaceId,
+        updatedAt: now,
+        lastEditedBy: params.workspace.ownerName,
+        lastEditedByEmail: params.workspace.ownerEmail,
+        lastEditedAt: now,
+      }));
+    }
+  } else if (params.createNewBabyStep || !params.selectedBabyStepDocId) {
+    // Create clean default Baby Step 1 state
+    const cleanBabyState: BabyStepsState = {
+      id: newWorkspaceId,
+      householdId: newWorkspaceId,
+      workspaceId: newWorkspaceId,
+      currentStep: 1,
+      step1EmergencyFundTarget: 20000,
+      step1CurrentBalance: 0,
+      step3MonthsTarget: 3,
+      step3CurrentBalance: 0,
+      step4MonthlyInvestment: 0,
+      step5CollegeFundBalance: 0,
+      step6BondBalance: 0,
+      step6MonthlyExtra: 0,
+      step7GivingMonthly: 0,
+      notes: `Baby Steps plan for ${params.workspace.name}`,
+      updatedAt: now,
+      lastEditedBy: params.workspace.ownerName,
+      lastEditedByEmail: params.workspace.ownerEmail,
+      lastEditedAt: now,
+    };
+    batch.set(doc(db, 'baby_steps_state', newWorkspaceId), cleanBabyState);
+  }
+
+  // 3. Link selected Accounts
+  for (const accId of params.selectedAccountIds) {
+    batch.set(
+      doc(db, 'financial_accounts', accId),
+      {
+        householdId: newWorkspaceId,
+        workspaceId: newWorkspaceId,
+        updatedAt: now,
+        lastEditedBy: params.workspace.ownerName,
+        lastEditedByEmail: params.workspace.ownerEmail,
+        lastEditedAt: now,
+      },
+      { merge: true }
+    );
+  }
+
+  // 4. Link selected Budget Periods (and write full doc if period was discovered or archived)
+  for (const periodId of params.selectedPeriodIds) {
+    const periodMeta = params.discoveredPeriods?.find((p) => p.id === periodId);
+    if (periodMeta) {
+      batch.set(
+        doc(db, 'budget_periods', periodId),
+        cleanFirestoreObject({
+          ...periodMeta,
+          id: periodId,
+          householdId: newWorkspaceId,
+          workspaceId: newWorkspaceId,
+          updatedAt: now,
+          lastEditedBy: params.workspace.ownerName,
+          lastEditedByEmail: params.workspace.ownerEmail,
+          lastEditedAt: now,
+        }),
+        { merge: true }
+      );
+    } else {
+      batch.set(
+        doc(db, 'budget_periods', periodId),
+        {
+          householdId: newWorkspaceId,
+          workspaceId: newWorkspaceId,
+          updatedAt: now,
+          lastEditedBy: params.workspace.ownerName,
+          lastEditedByEmail: params.workspace.ownerEmail,
+          lastEditedAt: now,
+        },
+        { merge: true }
+      );
+    }
+  }
+
+  await batch.commit();
+
+  // 5. Also link/restore all child items (incomes, categories, expenses, debts, emergency logs)
+  const childBatch = writeBatch(db);
+  let childUpdates = 0;
+
+  if (params.selectedPeriodIds.length > 0) {
+    for (const periodId of params.selectedPeriodIds) {
+      const periodMeta = params.discoveredPeriods?.find((p) => p.id === periodId);
+
+      // Incomes
+      const incSnap = await getDocs(query(collection(db, 'incomes'), where('periodId', '==', periodId)));
+      incSnap.forEach((d) => {
+        childBatch.update(d.ref, {
+          householdId: newWorkspaceId,
+          workspaceId: newWorkspaceId,
+          updatedAt: now,
+        });
+        childUpdates++;
+      });
+
+      // If incomes were only in archive, restore them
+      if (incSnap.empty && periodMeta?.archivedIncomes && periodMeta.archivedIncomes.length > 0) {
+        for (const inc of periodMeta.archivedIncomes) {
+          childBatch.set(doc(db, 'incomes', inc.id), cleanFirestoreObject({
+            ...inc,
+            householdId: newWorkspaceId,
+            workspaceId: newWorkspaceId,
+            updatedAt: now,
+          }));
+          childUpdates++;
+        }
+      }
+
+      // Categories
+      const catSnap = await getDocs(query(collection(db, 'budget_categories'), where('periodId', '==', periodId)));
+      catSnap.forEach((d) => {
+        childBatch.update(d.ref, {
+          householdId: newWorkspaceId,
+          workspaceId: newWorkspaceId,
+          updatedAt: now,
+        });
+        childUpdates++;
+      });
+
+      // If categories were only in archive, restore them
+      if (catSnap.empty && periodMeta?.archivedCategories && periodMeta.archivedCategories.length > 0) {
+        for (const cat of periodMeta.archivedCategories) {
+          childBatch.set(doc(db, 'budget_categories', cat.id), cleanFirestoreObject({
+            ...cat,
+            householdId: newWorkspaceId,
+            workspaceId: newWorkspaceId,
+            updatedAt: now,
+          }));
+          childUpdates++;
+        }
+      }
+
+      // Expenses
+      const expSnap = await getDocs(query(collection(db, 'expenses'), where('periodId', '==', periodId)));
+      expSnap.forEach((d) => {
+        childBatch.update(d.ref, {
+          householdId: newWorkspaceId,
+          workspaceId: newWorkspaceId,
+          updatedAt: now,
+        });
+        childUpdates++;
+      });
+
+      // If expenses were only in archive, restore them
+      if (expSnap.empty && periodMeta?.archivedExpenses && periodMeta.archivedExpenses.length > 0) {
+        for (const exp of periodMeta.archivedExpenses) {
+          childBatch.set(doc(db, 'expenses', exp.id), cleanFirestoreObject({
+            ...exp,
+            householdId: newWorkspaceId,
+            workspaceId: newWorkspaceId,
+            updatedAt: now,
+          }));
+          childUpdates++;
+        }
+      }
+    }
+  }
+
+  // Also link debts associated with selected accounts or unassigned debts
+  const debtsSnap = await getDocs(collection(db, 'debts'));
+  debtsSnap.forEach((d) => {
+    const data = d.data() as Debt;
+    if (
+      !data.householdId ||
+      data.householdId === 'shared_family_workspace' ||
+      data.householdId === 'main' ||
+      (data.linkedAccountId && params.selectedAccountIds.includes(data.linkedAccountId))
+    ) {
+      childBatch.update(d.ref, {
+        householdId: newWorkspaceId,
+        workspaceId: newWorkspaceId,
+        updatedAt: now,
+      });
+      childUpdates++;
+    }
+  });
+
+  // Also link emergency logs
+  const logsSnap = await getDocs(collection(db, 'emergency_fund_logs'));
+  logsSnap.forEach((d) => {
+    const data = d.data() as EmergencyFundLog;
+    if (!data.householdId || data.householdId === 'shared_family_workspace' || data.householdId === 'main') {
+      childBatch.update(d.ref, {
+        householdId: newWorkspaceId,
+        workspaceId: newWorkspaceId,
+        updatedAt: now,
+      });
+      childUpdates++;
+    }
+  });
+
+  if (childUpdates > 0) {
+    await childBatch.commit();
+  }
+
+  // 6. Update user profile active & list of workspaces
+  try {
+    const profileRef = doc(db, 'user_profiles', params.workspace.ownerId);
+    const profileSnap = await getDoc(profileRef);
+    if (profileSnap.exists()) {
+      const pData = profileSnap.data() as UserProfile;
+      const currentList = Array.isArray(pData.workspaceIds) ? pData.workspaceIds : [];
+      await updateDoc(profileRef, {
+        activeWorkspaceId: newWorkspaceId,
+        defaultWorkspaceId: newWorkspaceId,
+        workspaceIds: Array.from(new Set([...currentList, newWorkspaceId])),
+        updatedAt: now,
+      });
+    }
+  } catch (e) {
+    console.error('Error updating user profile with new workspace:', e);
+  }
+
+  return newWs;
+}
+
+export interface LinkToExistingWorkspaceParams {
+  workspaceId: string;
+  userName: string;
+  userEmail: string;
+  selectedBabyStepDocId?: string | null;
+  selectedPeriodIds: string[];
+  selectedAccountIds: string[];
+  discoveredPeriods?: BudgetPeriodOption[];
+}
+
+/**
+ * Allows linking existing unassigned data or discovered archive periods to an existing workspace
+ */
+export async function linkDataToExistingWorkspace(params: LinkToExistingWorkspaceParams): Promise<void> {
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+
+  // Baby Step
+  if (params.selectedBabyStepDocId) {
+    const sourceSnap = await getDoc(doc(db, 'baby_steps_state', params.selectedBabyStepDocId));
+    if (sourceSnap.exists()) {
+      const sourceData = sourceSnap.data() as BabyStepsState;
+      batch.set(doc(db, 'baby_steps_state', params.workspaceId), cleanFirestoreObject({
+        ...sourceData,
+        id: params.workspaceId,
+        householdId: params.workspaceId,
+        workspaceId: params.workspaceId,
+        updatedAt: now,
+        lastEditedBy: params.userName,
+        lastEditedByEmail: params.userEmail,
+        lastEditedAt: now,
+      }));
+    }
+  }
+
+  // Accounts
+  for (const accId of params.selectedAccountIds) {
+    batch.set(
+      doc(db, 'financial_accounts', accId),
+      {
+        householdId: params.workspaceId,
+        workspaceId: params.workspaceId,
+        updatedAt: now,
+        lastEditedBy: params.userName,
+        lastEditedByEmail: params.userEmail,
+        lastEditedAt: now,
+      },
+      { merge: true }
+    );
+  }
+
+  // Periods
+  for (const periodId of params.selectedPeriodIds) {
+    const periodMeta = params.discoveredPeriods?.find((p) => p.id === periodId);
+    if (periodMeta) {
+      batch.set(
+        doc(db, 'budget_periods', periodId),
+        cleanFirestoreObject({
+          ...periodMeta,
+          id: periodId,
+          householdId: params.workspaceId,
+          workspaceId: params.workspaceId,
+          updatedAt: now,
+          lastEditedBy: params.userName,
+          lastEditedByEmail: params.userEmail,
+          lastEditedAt: now,
+        }),
+        { merge: true }
+      );
+    } else {
+      batch.set(
+        doc(db, 'budget_periods', periodId),
+        {
+          householdId: params.workspaceId,
+          workspaceId: params.workspaceId,
+          updatedAt: now,
+          lastEditedBy: params.userName,
+          lastEditedByEmail: params.userEmail,
+          lastEditedAt: now,
+        },
+        { merge: true }
+      );
+    }
+  }
+
+  await batch.commit();
+
+  // Child items
+  const childBatch = writeBatch(db);
+  let childUpdates = 0;
+
+  if (params.selectedPeriodIds.length > 0) {
+    for (const periodId of params.selectedPeriodIds) {
+      const periodMeta = params.discoveredPeriods?.find((p) => p.id === periodId);
+
+      const incSnap = await getDocs(query(collection(db, 'incomes'), where('periodId', '==', periodId)));
+      incSnap.forEach((d) => {
+        childBatch.update(d.ref, {
+          householdId: params.workspaceId,
+          workspaceId: params.workspaceId,
+          updatedAt: now,
+        });
+        childUpdates++;
+      });
+
+      if (incSnap.empty && periodMeta?.archivedIncomes && periodMeta.archivedIncomes.length > 0) {
+        for (const inc of periodMeta.archivedIncomes) {
+          childBatch.set(doc(db, 'incomes', inc.id), cleanFirestoreObject({
+            ...inc,
+            householdId: params.workspaceId,
+            workspaceId: params.workspaceId,
+            updatedAt: now,
+          }));
+          childUpdates++;
+        }
+      }
+
+      const catSnap = await getDocs(query(collection(db, 'budget_categories'), where('periodId', '==', periodId)));
+      catSnap.forEach((d) => {
+        childBatch.update(d.ref, {
+          householdId: params.workspaceId,
+          workspaceId: params.workspaceId,
+          updatedAt: now,
+        });
+        childUpdates++;
+      });
+
+      if (catSnap.empty && periodMeta?.archivedCategories && periodMeta.archivedCategories.length > 0) {
+        for (const cat of periodMeta.archivedCategories) {
+          childBatch.set(doc(db, 'budget_categories', cat.id), cleanFirestoreObject({
+            ...cat,
+            householdId: params.workspaceId,
+            workspaceId: params.workspaceId,
+            updatedAt: now,
+          }));
+          childUpdates++;
+        }
+      }
+
+      const expSnap = await getDocs(query(collection(db, 'expenses'), where('periodId', '==', periodId)));
+      expSnap.forEach((d) => {
+        childBatch.update(d.ref, {
+          householdId: params.workspaceId,
+          workspaceId: params.workspaceId,
+          updatedAt: now,
+        });
+        childUpdates++;
+      });
+
+      if (expSnap.empty && periodMeta?.archivedExpenses && periodMeta.archivedExpenses.length > 0) {
+        for (const exp of periodMeta.archivedExpenses) {
+          childBatch.set(doc(db, 'expenses', exp.id), cleanFirestoreObject({
+            ...exp,
+            householdId: params.workspaceId,
+            workspaceId: params.workspaceId,
+            updatedAt: now,
+          }));
+          childUpdates++;
+        }
+      }
+    }
+  }
+
+  // Also link debts associated with selected accounts or unassigned debts
+  const debtsSnap = await getDocs(collection(db, 'debts'));
+  debtsSnap.forEach((d) => {
+    const data = d.data() as Debt;
+    if (
+      !data.householdId ||
+      data.householdId === 'shared_family_workspace' ||
+      data.householdId === 'main' ||
+      (data.linkedAccountId && params.selectedAccountIds.includes(data.linkedAccountId))
+    ) {
+      childBatch.update(d.ref, {
+        householdId: params.workspaceId,
+        workspaceId: params.workspaceId,
+        updatedAt: now,
+      });
+      childUpdates++;
+    }
+  });
+
+  // Also link emergency logs
+  const logsSnap = await getDocs(collection(db, 'emergency_fund_logs'));
+  logsSnap.forEach((d) => {
+    const data = d.data() as EmergencyFundLog;
+    if (!data.householdId || data.householdId === 'shared_family_workspace' || data.householdId === 'main') {
+      childBatch.update(d.ref, {
+        householdId: params.workspaceId,
+        workspaceId: params.workspaceId,
+        updatedAt: now,
+      });
+      childUpdates++;
+    }
+  });
+
+  if (childUpdates > 0) {
+    await childBatch.commit();
+  }
+}
+
 
 

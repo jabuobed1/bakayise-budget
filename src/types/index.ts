@@ -27,6 +27,8 @@ export interface EditAuditInfo {
   lastEditedBy?: string; // 'Hubby' | 'Wifey' | custom name
   lastEditedByEmail?: string; // 'jabuobed1@gmail.com' | 'lumzayopa@gmail.com'
   lastEditedAt?: string; // ISO 8601 Timestamp
+  householdId?: string; // Standard household/workspace ID
+  workspaceId?: string; // Explicit workspace ID
 }
 
 export type PeriodStatus = 'active' | 'planning' | 'completed' | 'archived';
@@ -59,6 +61,7 @@ export interface FinancialAccount extends EditAuditInfo {
 
   // Baby Step Assignment (Step 1, Step 3, Step 4, Step 5, Step 6, or null)
   babyStepAssignment?: number | null;
+  babyStepAssignments?: number[]; // Allow multiple assignments (e.g. [1, 3])
 
   // Credit Card specific fields
   creditLimit?: number; // Total approved credit limit (e.g. R25,000)
@@ -127,6 +130,7 @@ export interface Income extends EditAuditInfo {
   status: 'expected' | 'received';
   order?: number; // Position in Excel list
   notes?: string;
+  transferId?: string; // Link related transfer entries
   createdAt: string;
   updatedAt: string;
 }
@@ -144,6 +148,7 @@ export interface BudgetCategory extends EditAuditInfo {
   icon?: string;
   order?: number; // Position in Excel list
   isEssential: boolean; // Essential expenses for 3-6 months emergency fund calculation
+  isRecurring?: boolean; // Default true: for Baby Step 3 calculation
   createdAt: string;
   updatedAt: string;
 }
@@ -160,6 +165,7 @@ export interface Expense extends EditAuditInfo {
   paymentMethod?: string;
   notes?: string;
   receiptUrl?: string;
+  transferId?: string; // Link related transfer entries
   createdAt: string;
   updatedAt: string;
 }
@@ -243,12 +249,27 @@ export interface ArchivedWorksheet extends EditAuditInfo {
   notes?: string;
 }
 
+export interface Workspace extends EditAuditInfo {
+  id: string;
+  name: string;
+  description?: string;
+  ownerId: string;
+  memberIds: string[];
+  isPrivate?: boolean; // If true, only the owner can access. If false/undefined, all family members (Hubby/Wifey) can view and join.
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
+
 export interface UserProfile extends EditAuditInfo {
   uid: string;
   email: string;
   displayName: string;
   role: UserRole;
-  householdId: string;
+  householdId: string; // Deprecated or kept for compatibility
+  activeWorkspaceId?: string;
+  workspaceIds?: string[];
+  defaultWorkspaceId?: string;
   linkedUserIds?: string[];
   avatarColor?: string;
   createdAt?: string;

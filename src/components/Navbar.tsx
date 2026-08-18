@@ -4,7 +4,7 @@ import { formatZARCompact } from '../utils/southAfricaHolidays';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Menu, Smartphone, Monitor, Sparkles, UserCheck } from 'lucide-react';
 
-export type ActiveTab = 'budget' | 'expenses' | 'accounts' | 'babysteps' | 'snowball' | 'calendar';
+export type ActiveTab = 'budget' | 'expenses' | 'transactions' | 'accounts' | 'babysteps' | 'snowball' | 'calendar';
 
 interface NavbarProps {
   activeTab: ActiveTab;
@@ -13,6 +13,7 @@ interface NavbarProps {
   onOpenNavMenu: () => void;
   step1Balance?: number;
   totalDebtBalance?: number;
+  totalBankBalance?: number; // Total across all accounts
   unassignedAmount?: number;
   currentStep?: number;
   isIPhoneFrameMode?: boolean;
@@ -26,6 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenNavMenu,
   step1Balance = 0,
   totalDebtBalance = 0,
+  totalBankBalance = 0,
   unassignedAmount = 0,
   currentStep = 1,
   isIPhoneFrameMode = false,
@@ -37,19 +39,22 @@ export const Navbar: React.FC<NavbarProps> = ({
   const navItems: { id: ActiveTab; label: string; icon: FigmaIconName }[] = [
     { id: 'budget', label: 'Budget Plan', icon: 'wallet' },
     { id: 'expenses', label: 'Expenses', icon: 'receipt' },
+    { id: 'transactions', label: 'Transactions', icon: 'history' },
     { id: 'accounts', label: 'Accounts & Funds', icon: 'wallet' },
     { id: 'babysteps', label: 'Baby Steps', icon: 'trophy' },
     { id: 'snowball', label: 'Debt Snowball', icon: 'flame' },
     { id: 'calendar', label: 'Paydays & Holidays', icon: 'calendarDays' },
   ];
 
-  // Dynamic pill status calculation
-  const statusLabel =
+  // Dynamic pill status calculation: [Total Bank Balance] / [Unassigned Left/Over]
+  const unassignedLabel =
     Math.abs(unassignedAmount) < 0.01
-      ? 'R0.00 Zero-Based'
+      ? 'R0.00'
       : unassignedAmount > 0
       ? `${formatZARCompact(unassignedAmount)} Left`
       : `${formatZARCompact(Math.abs(unassignedAmount))} Over`;
+
+  const statusLabel = `${formatZARCompact(totalBankBalance)} / ${unassignedLabel}`;
 
   const statusColor =
     Math.abs(unassignedAmount) < 0.01 ? '#30D158' : unassignedAmount > 0 ? '#FF9F0A' : '#FF453A';

@@ -206,6 +206,7 @@ export const DEFAULT_STARTER_ACCOUNTS: Omit<FinancialAccount, 'id' | 'createdAt'
 ];
 
 export const COMMON_CATEGORY_TAGS = [
+  { id: 'retirement', label: 'Retirement (15%)', color: '#BF5AF2', bg: 'rgba(191,90,242,0.15)' },
   { id: 'bond', label: 'Bond & Rent', color: '#0A84FF', bg: 'rgba(10,132,255,0.15)' },
   { id: 'debt', label: 'Debt Snowball', color: '#FF453A', bg: 'rgba(255,69,58,0.15)' },
   { id: 'food', label: 'Food & Groceries', color: '#FF9F0A', bg: 'rgba(255,159,10,0.15)' },
@@ -344,16 +345,6 @@ export const DAVE_RAMSEY_STEPS = [
   },
   {
     step: 4,
-    title: 'Invest 15% in Retirement',
-    subtitle: 'Invest 15% of household income for the future',
-    saDescription:
-      'Contribute 15% of gross family income into Retirement Annuities (RAs), Pension/Provident Funds, and Tax-Free Savings Accounts (TFSA) up to the R36,000 annual limit in South Africa.',
-    target: 0,
-    accent: '#8b5cf6',
-    badge: 'Wealth Engine',
-  },
-  {
-    step: 5,
     title: "Children's Education Fund",
     subtitle: 'Save for school and university fees',
     saDescription:
@@ -361,6 +352,16 @@ export const DAVE_RAMSEY_STEPS = [
     target: 0,
     accent: '#f59e0b',
     badge: 'Family Legacy',
+  },
+  {
+    step: 5,
+    title: 'Invest 15% in Retirement',
+    subtitle: 'Invest 15% of main monthly salary for the future',
+    saDescription:
+      'Contribute 15% of main household income into Retirement Annuities (RAs) and Pension/Provident Funds in South Africa.',
+    target: 0,
+    accent: '#8b5cf6',
+    badge: 'Wealth Engine',
   },
   {
     step: 6,

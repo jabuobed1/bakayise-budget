@@ -56,6 +56,7 @@ import {
   CalendarDays,
   SmartphoneNfc,
   Sparkle,
+  History,
 } from 'lucide-react';
 
 export type FigmaIconName =
@@ -111,7 +112,8 @@ export type FigmaIconName =
   | 'close'
   | 'info'
   | 'calendarDays'
-  | 'nfc';
+  | 'nfc'
+  | 'history';
 
 interface FigmaIconProps {
   name: FigmaIconName;
@@ -176,6 +178,7 @@ const ICON_COMPONENTS: Record<FigmaIconName, React.ComponentType<any>> = {
   info: Info,
   calendarDays: CalendarDays,
   nfc: SmartphoneNfc,
+  history: History,
 };
 
 const SIZE_MAP = {

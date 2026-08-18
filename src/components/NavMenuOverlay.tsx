@@ -36,6 +36,7 @@ interface NavMenuOverlayProps {
   onOpenPeriodModal: () => void;
   onOpenTagAnalysis: () => void;
   onOpenCalendarModal: () => void;
+  onOpenWorkspaceModal: () => void; // Added for workspace switcher
   onOpenArchivedWorksheets?: () => void;
   onExportJSON: () => void;
   onPrint: () => void;
@@ -60,6 +61,7 @@ export const NavMenuOverlay: React.FC<NavMenuOverlayProps> = ({
   onOpenPeriodModal,
   onOpenTagAnalysis,
   onOpenCalendarModal,
+  onOpenWorkspaceModal,
   onOpenArchivedWorksheets,
   onExportJSON,
   onPrint,
@@ -72,7 +74,10 @@ export const NavMenuOverlay: React.FC<NavMenuOverlayProps> = ({
   isIPhoneFrameMode,
   onToggleIPhoneFrameMode,
 }) => {
-  const { user, member, logout } = useAuth();
+  const { user, member, activeWorkspaceId, workspaces, logout } = useAuth();
+  
+  // Find active workspace name
+  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
   // Close on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -133,6 +138,13 @@ export const NavMenuOverlay: React.FC<NavMenuOverlayProps> = ({
       description: 'Log and review family transactions, merchant tags & receipts',
       icon: 'receipt',
       color: '#38BDF8',
+    },
+    {
+      id: 'transactions',
+      title: 'All Transactions Ledger',
+      description: 'Combined history of all income and expense items',
+      icon: 'history',
+      color: '#30D158',
     },
     {
       id: 'accounts',
@@ -207,6 +219,33 @@ export const NavMenuOverlay: React.FC<NavMenuOverlayProps> = ({
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
           
+          {/* Workspace Switcher Chip */}
+          <div className="flex items-center justify-between gap-3 p-3.5 rounded-[18px] bg-gradient-to-tr from-[#1C1C1E] to-[#242426] border border-white/10 shadow-lg">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                <Wallet className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Workspace</p>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-white/10 text-slate-300">
+                    {activeWorkspace?.isPrivate ? '🔒 Private' : '🌐 Family'}
+                  </span>
+                </div>
+                <h4 className="text-sm font-bold text-white truncate">{activeWorkspace?.name || 'No Workspace Selected'}</h4>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                onClose();
+                onOpenWorkspaceModal();
+              }}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-[11px] font-bold border border-emerald-500/30 transition active:scale-95 cursor-pointer shrink-0"
+            >
+              Workspaces
+            </button>
+          </div>
+
           {/* Family Member Profile & Google Auth Chip */}
           {member && (
             <div className="p-3.5 rounded-[18px] bg-[#242426] border border-white/10 flex items-center justify-between gap-3">

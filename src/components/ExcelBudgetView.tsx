@@ -29,6 +29,8 @@ import {
   MoreVertical,
   CornerDownRight,
   Sparkles,
+  X,
+  ChevronRight,
 } from 'lucide-react';
 
 interface ExcelBudgetViewProps {
@@ -36,6 +38,7 @@ interface ExcelBudgetViewProps {
   incomes: Income[];
   expenses: Expense[];
   accounts?: FinancialAccount[];
+  periods?: BudgetPeriod[]; // Added to allow copying to other cycles
   currentPeriod?: BudgetPeriod;
   onOpenAddCategoryModal: () => void;
   onOpenEditCategoryModal: (cat: BudgetCategory) => void;
@@ -58,6 +61,8 @@ interface ExcelBudgetViewProps {
   onOpenTagAnalysis: () => void;
   onOpenAddAccountModal?: () => void;
   onOpenEditPeriodModal?: () => void;
+  onCopyToCycle?: (item: BudgetCategory | Income, targetPeriodId: string) => Promise<void>;
+  onCopyWholeCycle?: (targetPeriodId: string) => Promise<void>;
 }
 
 export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
@@ -65,6 +70,7 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
   incomes,
   expenses,
   accounts = [],
+  periods = [],
   currentPeriod,
   onOpenAddCategoryModal,
   onOpenEditCategoryModal,
@@ -87,6 +93,8 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
   onOpenTagAnalysis,
   onOpenAddAccountModal,
   onOpenEditPeriodModal,
+  onCopyToCycle,
+  onCopyWholeCycle,
 }) => {
   // Search and Account Filters
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -129,6 +137,10 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
 
   // Top section (Incomes & Grand Totals) collapse state
   const [isTopSectionCollapsed, setIsTopSectionCollapsed] = useState<boolean>(true);
+
+  // Copy to cycle modal state
+  const [copyTargetItem, setCopyTargetItem] = useState<BudgetCategory | Income | 'whole_cycle' | null>(null);
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
 
   // Quick Account Map for lookup
   const accountMap = useMemo(() => {
@@ -536,6 +548,17 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-semibold">
                   Zero-Based: R 0.00
                 </span>
+                <button
+                  onClick={() => {
+                    setCopyTargetItem('whole_cycle');
+                    setIsCopyModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-[10px] font-bold border border-sky-500/30 transition active:scale-95 cursor-pointer"
+                  title="Copy this entire worksheet's budget data to another pay cycle"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>Copy Sheet</span>
+                </button>
               </div>
               <p className="text-[11px] text-slate-400">
                 Reorder rows, insert between, duplicate & link bank accounts
@@ -908,6 +931,16 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                                   title="Insert row below this item"
                                 >
                                   <PlusCircle className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setCopyTargetItem(inc);
+                                    setIsCopyModalOpen(true);
+                                  }}
+                                  className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-sky-400 hover:bg-white/10 transition cursor-pointer"
+                                  title="Copy this income to another pay cycle"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   onClick={() => handleDuplicateInc(inc, index)}
@@ -1443,7 +1476,31 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                               <PlusCircle className="w-3.5 h-3.5" />
                             </button>
 
-                            {/* Duplicate row */}
+                            <button
+                              onClick={() => {
+                                if (onUpdateCategory) {
+                                  onUpdateCategory(cat.id, { isRecurring: !cat.isRecurring });
+                                }
+                              }}
+                              className={`w-6 h-6 rounded-[6px] flex items-center justify-center transition cursor-pointer ${
+                                cat.isRecurring !== false
+                                  ? 'text-emerald-400 hover:bg-emerald-500/10'
+                                  : 'text-slate-500 hover:bg-white/10'
+                              }`}
+                              title={cat.isRecurring !== false ? 'Recurring Monthly (Active)' : 'Once-off Expense (Click to make recurring)'}
+                            >
+                              <Sparkles className={`w-3.5 h-3.5 ${cat.isRecurring !== false ? 'fill-emerald-400/20' : ''}`} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCopyTargetItem(cat);
+                                setIsCopyModalOpen(true);
+                              }}
+                              className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-sky-400 hover:bg-white/10 transition cursor-pointer"
+                              title="Copy this category/envelope to another pay cycle"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               onClick={() => handleDuplicateCat(cat, index)}
                               className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-cyan-400 hover:bg-white/10 transition cursor-pointer"
@@ -1690,6 +1747,66 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
         </div>
 
       </div>
+
+      {/* Copy to Cycle Modal */}
+      {isCopyModalOpen && (
+        <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#1C1C1E] border border-white/10 rounded-[28px] max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-5 border-b border-white/10 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-sky-500/20 flex items-center justify-center text-sky-400">
+                  <Copy className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Copy to Another Cycle</h3>
+                  <p className="text-[10px] text-slate-500">Select the target pay cycle</p>
+                </div>
+              </div>
+              <button onClick={() => setIsCopyModalOpen(false)} className="p-1.5 rounded-full hover:bg-white/5 text-slate-400 transition cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-2 max-h-[300px] overflow-y-auto">
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1 mb-1">Target Pay Cycles</div>
+              {periods
+                .filter(p => p.id !== currentPeriod?.id)
+                .map(p => (
+                  <button
+                    key={p.id}
+                    onClick={async () => {
+                      if (copyTargetItem === 'whole_cycle') {
+                        if (onCopyWholeCycle) await onCopyWholeCycle(p.id);
+                      } else if (copyTargetItem && onCopyToCycle) {
+                        await onCopyToCycle(copyTargetItem, p.id);
+                      }
+                      setIsCopyModalOpen(false);
+                    }}
+                    className="w-full text-left p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 transition flex items-center justify-between group cursor-pointer"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-200 group-hover:text-white truncate">{p.name}</p>
+                      <p className="text-[10px] text-slate-500">{formatDateNice(p.startDate)} - {formatDateNice(p.endDate)}</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-sky-400 transition" />
+                  </button>
+                ))}
+              {periods.length <= 1 && (
+                <p className="text-xs text-slate-500 text-center py-4">No other pay cycles available to copy to.</p>
+              )}
+            </div>
+            
+            <div className="p-4 bg-white/5 flex justify-end">
+              <button
+                onClick={() => setIsCopyModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -67,7 +67,7 @@ export function isAllowedFamilyEmail(email?: string | null): boolean {
 /**
  * Returns audit tracking fields for the active authenticated user
  */
-export function getAuditFields() {
+export function getAuditFields(activeWorkspaceId?: string) {
   const currentUser = auth.currentUser;
   const email = currentUser?.email ? currentUser.email.trim().toLowerCase() : '';
   const member = getFamilyMemberByEmail(email);
@@ -77,7 +77,7 @@ export function getAuditFields() {
 
   return {
     userId: currentUser?.uid || '',
-    householdId: 'shared_family_workspace',
+    householdId: activeWorkspaceId || 'shared_family_workspace',
     lastEditedBy: editor,
     lastEditedByEmail: email || 'jabuobed1@gmail.com',
     lastEditedAt: now,

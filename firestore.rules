@@ -1,74 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global helper functions
-    function isValidId(id) {
-      return id is string && id.size() <= 128;
-    }
-
-    // Allow signed in family members / app users
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    // Default deny for unmatched collections
     match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Connection test document
-    match /test/{docId} {
-      allow get, list, create, update, delete: if true;
-    }
-
-    // User Profiles
-    match /user_profiles/{userId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Archived Worksheets & Backups
-    match /archived_worksheets/{archiveId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Financial Accounts
-    match /financial_accounts/{accountId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Budget Periods
-    match /budget_periods/{periodId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Incomes
-    match /incomes/{incomeId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Budget Categories
-    match /budget_categories/{categoryId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Expenses
-    match /expenses/{expenseId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Debts for Baby Step 2
-    match /debts/{debtId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Baby Steps State
-    match /baby_steps_state/{stateId} {
-      allow get, list, create, update, delete: if isSignedIn();
-    }
-
-    // Emergency Fund Logs
-    match /emergency_fund_logs/{logId} {
-      allow get, list, create, update, delete: if isSignedIn();
+      allow read, write: if true;
     }
   }
 }
