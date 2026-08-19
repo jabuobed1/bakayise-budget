@@ -240,23 +240,35 @@ export function generatePayPeriodInfo(
   };
 }
 
-export function formatDateNice(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date + 'T00:00:00') : date;
-  return d.toLocaleDateString('en-ZA', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+export function formatDateNice(date: Date | string | undefined | null): string {
+  if (!date) return '—';
+  try {
+    const d = typeof date === 'string' ? new Date(date + 'T00:00:00') : date;
+    if (isNaN(d.getTime())) return 'Invalid Date';
+    return d.toLocaleDateString('en-ZA', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch (e) {
+    return '—';
+  }
 }
 
-export function formatDateFull(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date + 'T00:00:00') : date;
-  return d.toLocaleDateString('en-ZA', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+export function formatDateFull(date: Date | string | undefined | null): string {
+  if (!date) return '—';
+  try {
+    const d = typeof date === 'string' ? new Date(date + 'T00:00:00') : date;
+    if (isNaN(d.getTime())) return 'Invalid Date';
+    return d.toLocaleDateString('en-ZA', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  } catch (e) {
+    return '—';
+  }
 }
 
 /**

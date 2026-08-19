@@ -969,11 +969,10 @@ function BakayiseAppContent() {
               babyState={babyState}
               debts={debts}
               categories={categories}
+              incomes={incomes}
+              currentPeriod={currentPeriod}
               emergencyLogs={emergencyLogs}
               accounts={accounts}
-              incomes={incomes}
-              expenses={expenses}
-              currentPeriod={currentPeriod}
               onOpenEmergencyModal={(step) => {
                 setEmergencyModalStep(step);
                 setIsEmergencyModalOpen(true);

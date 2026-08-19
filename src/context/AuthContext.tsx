@@ -26,6 +26,7 @@ import {
 } from '../utils/authConstants';
 import {
   fetchAllUserWorkspaces,
+  subscribeToAllWorkspaces,
   joinWorkspaceById,
   toggleWorkspacePrivacy,
 } from '../services/firestoreService';
@@ -64,88 +65,150 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [blockedEmail, setBlockedEmail] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(() => {
+    return localStorage.getItem('bakayise_active_workspace_id') || null;
+  });
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [availablePublicWorkspaces, setAvailablePublicWorkspaces] = useState<Workspace[]>([]);
 
-  const fetchWorkspaces = useCallback(async (u: User, profile?: UserProfile) => {
-    try {
-      const { joined, availablePublic } = await fetchAllUserWorkspaces(u.uid);
-
-      // If user has no joined workspaces and no public workspaces exist at all, create an initial default
-      if (joined.length === 0 && availablePublic.length === 0) {
-        const email = u.email?.toLowerCase() || '';
-        const memberInfo = getFamilyMemberByEmail(email);
-        const name = memberInfo ? `${memberInfo.displayName}'s Family Budget` : 'My Family Budget';
-        
-        const newWorkspaceId = `ws_${Date.now()}`;
-        const newWs: Workspace = {
-          id: newWorkspaceId,
-          name,
-          ownerId: u.uid,
-          memberIds: [u.uid],
-          isPrivate: false, // Default family shared
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          lastEditedBy: u.displayName || 'User',
-          lastEditedByEmail: u.email || '',
-          lastEditedAt: new Date().toISOString(),
-          userId: u.uid,
-          householdId: newWorkspaceId,
-          workspaceId: newWorkspaceId,
-        };
-
-        await setDoc(doc(db, 'workspaces', newWorkspaceId), newWs);
-        setWorkspaces([newWs]);
-        setAvailablePublicWorkspaces([]);
-        setActiveWorkspaceId(newWorkspaceId);
-
-        // Update profile with this workspace
-        const profileRef = doc(db, 'user_profiles', u.uid);
-        await setDoc(profileRef, {
-          activeWorkspaceId: newWorkspaceId,
-          defaultWorkspaceId: newWorkspaceId,
-          workspaceIds: [newWorkspaceId],
-          updatedAt: new Date().toISOString(),
-        }, { merge: true });
-
-        return;
-      }
-
-      setWorkspaces(joined);
-      setAvailablePublicWorkspaces(availablePublic);
-
-      if (joined.length > 0) {
-        // Preference: profile.defaultWorkspaceId > profile.activeWorkspaceId > first joined workspace
-        let targetId = profile?.defaultWorkspaceId || profile?.activeWorkspaceId;
-        
-        if (!targetId || !joined.find(w => w.id === targetId)) {
-          targetId = joined[0].id;
-        }
-        
-        setActiveWorkspaceId(targetId);
-
-        const profileRef = doc(db, 'user_profiles', u.uid);
-        await setDoc(profileRef, {
-          activeWorkspaceId: targetId,
-          updatedAt: new Date().toISOString(),
-        }, { merge: true });
-      } else if (availablePublic.length > 0) {
-        // Automatically set first discoverable as active preview or let user join
-        setActiveWorkspaceId(null);
-      }
-    } catch (err) {
-      console.error('Error fetching workspaces:', err);
+  // Real-time workspace subscription on user change
+  useEffect(() => {
+    if (!user || !member) {
+      setWorkspaces([]);
+      setAvailablePublicWorkspaces([]);
+      return;
     }
-  }, []);
+
+    let isSubscribed = true;
+    let unsubWorkspaces: (() => void) | null = null;
+
+    async function initUserWorkspaces() {
+      if (!user) return;
+      try {
+        // Fetch current profile
+        const profileRef = doc(db, 'user_profiles', user.uid);
+        const profileSnap = await getDoc(profileRef);
+        const profile = profileSnap.exists() ? (profileSnap.data() as UserProfile) : undefined;
+        const profileWsIds = profile?.workspaceIds || [];
+
+        // Subscribe in real-time to workspaces collection
+        unsubWorkspaces = subscribeToAllWorkspaces(
+          user.uid,
+          user.email || '',
+          profileWsIds,
+          async (result) => {
+            if (!isSubscribed) return;
+            const { joined, availablePublic, allWorkspaces } = result;
+
+            // Only create initial workspace if Firestore workspaces collection is completely empty (0 documents)
+            if (allWorkspaces.length === 0) {
+              const email = user.email?.toLowerCase() || '';
+              const memberInfo = getFamilyMemberByEmail(email);
+              const name = memberInfo ? `${memberInfo.displayName}'s Family Budget` : 'My Family Budget';
+              
+              const newWorkspaceId = `ws_${Date.now()}`;
+              const newWs: Workspace = {
+                id: newWorkspaceId,
+                name,
+                ownerId: user.uid,
+                memberIds: [user.uid],
+                isPrivate: false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                lastEditedBy: user.displayName || 'User',
+                lastEditedByEmail: user.email || '',
+                lastEditedAt: new Date().toISOString(),
+                userId: user.uid,
+                householdId: newWorkspaceId,
+                workspaceId: newWorkspaceId,
+              };
+
+              await setDoc(doc(db, 'workspaces', newWorkspaceId), newWs);
+              setWorkspaces([newWs]);
+              setAvailablePublicWorkspaces([]);
+              setActiveWorkspaceId(newWorkspaceId);
+              localStorage.setItem('bakayise_active_workspace_id', newWorkspaceId);
+
+              const pRef = doc(db, 'user_profiles', user.uid);
+              await setDoc(pRef, {
+                activeWorkspaceId: newWorkspaceId,
+                defaultWorkspaceId: newWorkspaceId,
+                workspaceIds: [newWorkspaceId],
+                updatedAt: new Date().toISOString(),
+              }, { merge: true });
+              return;
+            }
+
+            // Normal state: Workspaces exist in Firestore
+            setWorkspaces(joined);
+            setAvailablePublicWorkspaces(availablePublic);
+
+            // Resolve active workspace accurately
+            setActiveWorkspaceId((currentActive) => {
+              const storedId = localStorage.getItem('bakayise_active_workspace_id');
+              const profileActive = profile?.activeWorkspaceId || profile?.defaultWorkspaceId;
+
+              // 1. Current active if it exists in Firestore
+              if (currentActive && allWorkspaces.some((w) => w.id === currentActive)) {
+                return currentActive;
+              }
+              // 2. Stored ID in localStorage if it exists in Firestore
+              if (storedId && allWorkspaces.some((w) => w.id === storedId)) {
+                return storedId;
+              }
+              // 3. Profile default/active if it exists in Firestore
+              if (profileActive && allWorkspaces.some((w) => w.id === profileActive)) {
+                localStorage.setItem('bakayise_active_workspace_id', profileActive);
+                return profileActive;
+              }
+              // 4. First joined/user workspace
+              if (joined.length > 0) {
+                const target = joined[0].id;
+                localStorage.setItem('bakayise_active_workspace_id', target);
+                return target;
+              }
+              // 5. First available other workspace
+              if (availablePublic.length > 0) {
+                const target = availablePublic[0].id;
+                localStorage.setItem('bakayise_active_workspace_id', target);
+                return target;
+              }
+              return null;
+            });
+          }
+        );
+      } catch (err) {
+        console.error('Error initiating workspaces subscription:', err);
+      }
+    }
+
+    initUserWorkspaces();
+
+    return () => {
+      isSubscribed = false;
+      if (unsubWorkspaces) {
+        unsubWorkspaces();
+      }
+    };
+  }, [user, member]);
 
   const refreshWorkspaces = useCallback(async () => {
     if (!user) return;
-    const profileRef = doc(db, 'user_profiles', user.uid);
-    const profileSnap = await getDoc(profileRef);
-    const profile = profileSnap.exists() ? (profileSnap.data() as UserProfile) : undefined;
-    await fetchWorkspaces(user, profile);
-  }, [user, fetchWorkspaces]);
+    try {
+      const profileRef = doc(db, 'user_profiles', user.uid);
+      const profileSnap = await getDoc(profileRef);
+      const profile = profileSnap.exists() ? (profileSnap.data() as UserProfile) : undefined;
+      const { joined, availablePublic } = await fetchAllUserWorkspaces(
+        user.uid,
+        user.email || '',
+        profile?.workspaceIds
+      );
+      setWorkspaces(joined);
+      setAvailablePublicWorkspaces(availablePublic);
+    } catch (err) {
+      console.error('Error refreshing workspaces:', err);
+    }
+  }, [user]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -156,17 +219,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setMember(familyMember);
           setBlockedEmail(null);
           setAuthError(null);
-
-          // Fetch or create profile and workspaces
-          const profileRef = doc(db, 'user_profiles', currentUser.uid);
-          const profileSnap = await getDoc(profileRef);
-          let profile: UserProfile | undefined;
-          
-          if (profileSnap.exists()) {
-            profile = profileSnap.data() as UserProfile;
-          }
-          
-          await fetchWorkspaces(currentUser, profile);
         } else {
           // Unauthorized email
           const unauthEmail = currentUser.email;
@@ -193,18 +245,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => unsubscribe();
-  }, [fetchWorkspaces]);
+  }, []);
 
   const switchWorkspace = async (workspaceId: string) => {
     if (!user) return;
     setActiveWorkspaceId(workspaceId);
+    localStorage.setItem('bakayise_active_workspace_id', workspaceId);
     try {
       const profileRef = doc(db, 'user_profiles', user.uid);
-      await updateDoc(profileRef, {
-        activeWorkspaceId: workspaceId,
-        defaultWorkspaceId: workspaceId, // Update default as well when manually switching
-        updatedAt: new Date().toISOString(),
-      });
+      await setDoc(
+        profileRef,
+        {
+          activeWorkspaceId: workspaceId,
+          defaultWorkspaceId: workspaceId,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
     } catch (err) {
       console.error('Error updating active workspace in profile:', err);
     }
@@ -218,15 +275,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         name: newName,
         updatedAt: new Date().toISOString(),
         lastEditedBy: user.displayName || 'User',
+        lastEditedByEmail: user.email || '',
         lastEditedAt: new Date().toISOString(),
       });
-      setWorkspaces(prev => prev.map(ws => ws.id === workspaceId ? { ...ws, name: newName } : ws));
+      setWorkspaces((prev) =>
+        prev.map((ws) => (ws.id === workspaceId ? { ...ws, name: newName } : ws))
+      );
     } catch (err) {
       console.error('Error renaming workspace:', err);
     }
   };
 
-  const createWorkspace = async (name: string, isPrivate: boolean = false, description: string = ''): Promise<string> => {
+  const createWorkspace = async (
+    name: string,
+    isPrivate: boolean = false,
+    description: string = ''
+  ): Promise<string> => {
     if (!user) throw new Error('User not signed in');
     const newWorkspaceId = `ws_${Date.now()}`;
     const newWs: Workspace = {
@@ -247,8 +311,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     await setDoc(doc(db, 'workspaces', newWorkspaceId), newWs);
-    setWorkspaces(prev => [newWs, ...prev]);
     setActiveWorkspaceId(newWorkspaceId);
+    localStorage.setItem('bakayise_active_workspace_id', newWorkspaceId);
 
     // Update profile
     const profileRef = doc(db, 'user_profiles', user.uid);
@@ -274,7 +338,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       displayName: user.displayName,
       email: user.email,
     });
-    await refreshWorkspaces();
     await switchWorkspace(workspaceId);
   };
 
@@ -332,6 +395,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setBlockedEmail(null);
       setAuthError(null);
       setActiveWorkspaceId(null);
+      localStorage.removeItem('bakayise_active_workspace_id');
       setWorkspaces([]);
       setAvailablePublicWorkspaces([]);
     } catch (err) {
@@ -385,3 +449,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+

@@ -26,44 +26,8 @@ export const BudgetSummaryCard: React.FC<BudgetSummaryCardProps> = ({
   return (
     <div className="bg-[#1C1C1E] border border-white/[0.08] rounded-[24px] p-4 sm:p-6 shadow-xl mb-6 relative overflow-hidden">
       
-      {/* iOS Top Pill Status Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-white/[0.08]">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-[14px] bg-[#30D158]/15 border border-[#30D158]/30 flex items-center justify-center text-[#30D158] shrink-0">
-            <FigmaIcon name="wallet" size="md" strokeWidth={2.2} />
-          </div>
-          <div>
-            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              <span>Zero-Based Budget Balance</span>
-            </h2>
-            <p className="text-xs text-slate-400">
-              Give every single Rand a mission before payday
-            </p>
-          </div>
-        </div>
-
-        <div>
-          {isZeroBased ? (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#30D158]/15 text-[#30D158] border border-[#30D158]/30 shadow-sm">
-              <FigmaIcon name="check" size="xs" color="#30D158" />
-              <span>Zero-Based Complete (R0.00 left)</span>
-            </div>
-          ) : unassigned > 0 ? (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#FF9F0A]/15 text-[#FF9F0A] border border-[#FF9F0A]/30 shadow-sm">
-              <FigmaIcon name="alert" size="xs" color="#FF9F0A" />
-              <span>{formatZAR(unassigned)} Left to Assign</span>
-            </div>
-          ) : (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#FF453A]/15 text-[#FF453A] border border-[#FF453A]/30 shadow-sm">
-              <FigmaIcon name="alert" size="xs" color="#FF453A" />
-              <span>{formatZAR(Math.abs(unassigned))} Over Allocated!</span>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Main 4 Key Metrics (Apple Health / Wallet Card Grid) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         
         {/* 1. Total Income */}
         <div className="bg-[#2C2C2E]/70 rounded-[18px] p-3.5 sm:p-4 border border-white/[0.06] flex flex-col justify-between hover:bg-[#2C2C2E] transition">

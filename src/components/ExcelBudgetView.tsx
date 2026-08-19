@@ -536,43 +536,43 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
         
         {/* Header Ribbon */}
         <div className="px-4 py-3.5 bg-[#252528] border-b border-white/[0.08] flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-[10px] bg-[#107c41]/30 border border-[#107c41]/50 text-[#30D158] flex items-center justify-center font-black text-xs font-mono">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-[10px] bg-[#107c41]/30 border border-[#107c41]/50 text-[#30D158] flex items-center justify-center font-black text-xs font-mono shrink-0">
               XL
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-white tracking-tight">
-                  Excel Budget Sheet & Incomes
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold text-white tracking-tight truncate hidden sm:block">
+                  Ledger Spreadsheet
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-semibold">
-                  Zero-Based: R 0.00
-                </span>
+                <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                  <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-tight">Income:</span>
+                  <span className="text-[11px] text-emerald-300 font-mono font-bold">
+                    {formatZAR(totalPlannedIncome)}
+                  </span>
+                </div>
+                
                 <button
                   onClick={() => {
                     setCopyTargetItem('whole_cycle');
                     setIsCopyModalOpen(true);
                   }}
-                  className="flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-[10px] font-bold border border-sky-500/30 transition active:scale-95 cursor-pointer"
+                  className="flex items-center justify-center w-7 h-7 rounded-[8px] bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 transition active:scale-95 cursor-pointer shrink-0"
                   title="Copy this entire worksheet's budget data to another pay cycle"
                 >
-                  <Copy className="w-3 h-3" />
-                  <span>Copy Sheet</span>
+                  <Copy className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <p className="text-[11px] text-slate-400">
-                Reorder rows, insert between, duplicate & link bank accounts
-              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setIsTopSectionCollapsed(!isTopSectionCollapsed)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[12px] bg-[#2C2C2E] hover:bg-[#3A3A3C] text-slate-200 text-xs font-semibold border border-white/10 transition active:scale-95 cursor-pointer"
+              className="flex items-center justify-center w-8 h-8 rounded-[10px] bg-[#2C2C2E] hover:bg-[#3A3A3C] text-slate-200 border border-white/10 transition active:scale-95 cursor-pointer"
+              title={isTopSectionCollapsed ? 'Show Incomes & Overview' : 'Hide Summary'}
             >
-              <span>{isTopSectionCollapsed ? 'Show Incomes & Overview' : 'Hide Summary'}</span>
-              {isTopSectionCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              {isTopSectionCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
             </button>
           </div>
         </div>
@@ -614,9 +614,8 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                 <span className="text-[10px] text-slate-500 block mt-0.5">{categories.length} Envelopes</span>
               </div>
 
-              {/* Zero-Based Unassigned */}
               <div className="bg-[#242426] p-3 rounded-[16px] border border-white/[0.06]">
-                <span className="text-[10px] font-semibold text-slate-400 block">Unassigned (Zero-Based)</span>
+                <span className="text-[10px] font-semibold text-slate-400 block">Unassigned Balance</span>
                 <span
                   className={`text-base font-bold font-mono block mt-0.5 ${
                     Math.abs(unassignedZeroBased) < 0.01
@@ -629,7 +628,7 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                   {formatZAR(unassignedZeroBased)}
                 </span>
                 <span className="text-[10px] text-slate-500 block mt-0.5">
-                  {Math.abs(unassignedZeroBased) < 0.01 ? 'Every Rand assigned' : 'Aim for R0.00'}
+                  {Math.abs(unassignedZeroBased) < 0.01 ? 'Every Rand assigned' : 'Plan all funds'}
                 </span>
               </div>
 
@@ -653,20 +652,18 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
             <div className="p-4 sm:p-5">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 font-mono">
-                    [Table: Monthly Incomes & Deposits]
-                  </span>
-                  <span className="text-[11px] text-slate-400">
-                    ({incomes.length} sources)
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 font-mono">
+                    Income Streams
                   </span>
                 </div>
                 
                 <button
                   onClick={onOpenAddIncomeModal}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] bg-[#30D158]/20 hover:bg-[#30D158]/30 text-[#30D158] text-xs font-bold border border-[#30D158]/40 transition active:scale-95 cursor-pointer"
+                  className="flex items-center justify-center p-2 sm:px-3 sm:py-1.5 rounded-[10px] bg-[#30D158]/20 hover:bg-[#30D158]/30 text-[#30D158] text-xs font-bold border border-[#30D158]/40 transition active:scale-95 cursor-pointer"
+                  title="Add Income"
                 >
-                  <Plus className="w-3.5 h-3.5 stroke-[2.6]" />
-                  <span>+ Add Income</span>
+                  <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5 stroke-[2.6]" />
+                  <span className="hidden sm:inline ml-1">Add Income</span>
                 </button>
               </div>
 
@@ -693,13 +690,14 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                             <p className="text-slate-500 text-[11px]">
                               Add your salary, side hustle, or funds and link to your Capitec / bank account.
                             </p>
-                            <button
-                              onClick={onOpenAddIncomeModal}
-                              className="mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#30D158] hover:bg-[#34C759] text-black font-bold text-xs transition active:scale-95 cursor-pointer shadow-md"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>+ Add Salary / Income Stream</span>
-                            </button>
+                        <button
+                          onClick={onOpenAddIncomeModal}
+                          className="mt-1 flex items-center justify-center p-2.5 rounded-[10px] bg-[#30D158] hover:bg-[#34C759] text-black font-bold text-xs transition active:scale-95 cursor-pointer shadow-md"
+                          title="Add Salary / Income Stream"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span className="hidden sm:inline ml-1.5">Add Salary / Income Stream</span>
+                        </button>
                           </div>
                         </td>
                       </tr>
@@ -918,20 +916,9 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                               </button>
                             </td>
 
-                            {/* Actions: Insert Between, Duplicate, Edit, Delete */}
+                            {/* Actions: Edit, Delete */}
                             <td className="py-2 px-3 text-center">
                               <div className="flex items-center justify-center gap-1">
-                                <button
-                                  onClick={() => {
-                                    setInsertingBetweenIncIndex(insertingBetweenIncIndex === index ? null : index);
-                                    setBetweenIncTitle('');
-                                    setBetweenIncAmount('');
-                                  }}
-                                  className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-emerald-400 hover:bg-white/10 transition cursor-pointer"
-                                  title="Insert row below this item"
-                                >
-                                  <PlusCircle className="w-3.5 h-3.5" />
-                                </button>
                                 <button
                                   onClick={() => {
                                     setCopyTargetItem(inc);
@@ -939,13 +926,6 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                                   }}
                                   className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-sky-400 hover:bg-white/10 transition cursor-pointer"
                                   title="Copy this income to another pay cycle"
-                                >
-                                  <Copy className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => handleDuplicateInc(inc, index)}
-                                  className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-cyan-400 hover:bg-white/10 transition cursor-pointer"
-                                  title="Duplicate this row"
                                 >
                                   <Copy className="w-3.5 h-3.5" />
                                 </button>
@@ -1204,16 +1184,19 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                       <div className="flex items-center gap-2 mt-2">
                         <button
                           onClick={() => setIsInsertingRow(true)}
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-[10px] bg-[#30D158] hover:bg-[#34C759] text-black font-bold text-xs transition active:scale-95 cursor-pointer shadow-md"
+                          className="flex items-center justify-center p-2.5 sm:px-3.5 sm:py-2 rounded-[10px] bg-[#30D158] hover:bg-[#34C759] text-black font-bold text-xs transition active:scale-95 cursor-pointer shadow-md"
+                          title="Add First Category Row"
                         >
                           <Plus className="w-4 h-4 stroke-[2.5]" />
-                          <span>+ Add First Category Row</span>
+                          <span className="hidden sm:inline ml-1.5">Add Row</span>
                         </button>
                         <button
                           onClick={onOpenAddCategoryModal}
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-[10px] bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-semibold border border-white/10 transition cursor-pointer"
+                          className="flex items-center justify-center p-2.5 sm:px-3.5 sm:py-2 rounded-[10px] bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-semibold border border-white/10 transition cursor-pointer"
+                          title="Category Builder"
                         >
-                          <span>Category Builder</span>
+                          <Edit2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                          <span className="hidden sm:inline ml-1.5">Builder</span>
                         </button>
                       </div>
                     </div>
@@ -1462,20 +1445,6 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                         {/* [H] Actions: Insert Between, Duplicate, Log Expense, Edit, Delete */}
                         <td className="py-2.5 px-3 text-center">
                           <div className="flex items-center justify-center gap-1">
-                            {/* Insert row below */}
-                            <button
-                              onClick={() => {
-                                setInsertingBetweenCatIndex(insertingBetweenCatIndex === index ? null : index);
-                                setBetweenRowName('');
-                                setBetweenRowAmount('');
-                                setBetweenRowAccountId(cat.defaultAccountId || '');
-                              }}
-                              className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-emerald-400 hover:bg-white/10 transition cursor-pointer"
-                              title="Insert row below this item"
-                            >
-                              <PlusCircle className="w-3.5 h-3.5" />
-                            </button>
-
                             <button
                               onClick={() => {
                                 if (onUpdateCategory) {
@@ -1498,13 +1467,6 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                               }}
                               className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-sky-400 hover:bg-white/10 transition cursor-pointer"
                               title="Copy this category/envelope to another pay cycle"
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDuplicateCat(cat, index)}
-                              className="w-6 h-6 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-cyan-400 hover:bg-white/10 transition cursor-pointer"
-                              title="Duplicate this row"
                             >
                               <Copy className="w-3.5 h-3.5" />
                             </button>
@@ -1539,78 +1501,6 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                         </td>
                       </tr>
 
-                      {/* Row Insertion Bar (Between Categories) */}
-                      {insertingBetweenCatIndex === index && (
-                        <tr className="bg-emerald-950/30 border-y border-[#30D158]/50 animate-in fade-in duration-150">
-                          <td className="py-2 px-2 text-center text-emerald-400 font-mono text-[10px]">
-                            <CornerDownRight className="w-3.5 h-3.5 mx-auto" />
-                          </td>
-                          <td className="py-2 px-2">
-                            <input
-                              type="text"
-                              placeholder="New transaction type / category name..."
-                              value={betweenRowName}
-                              onChange={(e) => setBetweenRowName(e.target.value)}
-                              autoFocus
-                              className="w-full bg-[#1C1C1E] border border-emerald-500/50 text-white px-2 py-1 rounded-[6px] text-xs focus:outline-none"
-                            />
-                          </td>
-                          <td className="py-2 px-2">
-                            <select
-                              value={betweenRowTag}
-                              onChange={(e) => setBetweenRowTag(e.target.value)}
-                              className="w-full bg-[#1C1C1E] border border-emerald-500/50 text-white px-1.5 py-1 rounded-[6px] text-xs font-mono"
-                            >
-                              {COMMON_CATEGORY_TAGS.map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  #{t.id}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="py-2 px-2">
-                            <select
-                              value={betweenRowAccountId}
-                              onChange={(e) => setBetweenRowAccountId(e.target.value)}
-                              className="w-full bg-[#1C1C1E] border border-emerald-500/50 text-white px-1.5 py-1 rounded-[6px] text-xs"
-                            >
-                              <option value="" disabled>
-                                Select Account
-                              </option>
-                              {accounts.map((acc) => (
-                                <option key={acc.id} value={acc.id}>
-                                  {acc.name}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="py-2 px-2">
-                            <input
-                              type="text"
-                              placeholder="Budget (e.g. 500)"
-                              value={betweenRowAmount}
-                              onChange={(e) => setBetweenRowAmount(e.target.value)}
-                              className="w-full bg-[#1C1C1E] border border-emerald-500/50 text-white px-2 py-1 rounded-[6px] text-xs text-right font-mono"
-                            />
-                          </td>
-                          <td colSpan={4} className="py-2 px-2 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => setInsertingBetweenCatIndex(null)}
-                                className="px-2.5 py-1 rounded-[6px] bg-white/10 text-slate-300 text-xs font-semibold cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => handleSaveInsertBetweenCat(index + 1)}
-                                className="px-3 py-1 rounded-[6px] bg-[#30D158] text-black font-bold text-xs cursor-pointer shadow-md"
-                              >
-                                Insert Row Here
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                     </React.Fragment>
                   );
                 })
@@ -1695,18 +1585,20 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                     <div className="flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => setIsInsertingRow(true)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#30D158]/20 hover:bg-[#30D158]/30 text-[#30D158] text-xs font-bold border border-[#30D158]/40 transition active:scale-95 cursor-pointer"
+                        className="flex items-center justify-center p-2 sm:px-3 sm:py-1.5 rounded-[10px] bg-[#30D158]/20 hover:bg-[#30D158]/30 text-[#30D158] text-xs font-bold border border-[#30D158]/40 transition active:scale-95 cursor-pointer"
+                        title="Insert Row at Bottom"
                       >
-                        <Plus className="w-3.5 h-3.5 stroke-[2.6]" />
-                        <span>+ Insert Row at Bottom</span>
+                        <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5 stroke-[2.6]" />
+                        <span className="hidden sm:inline ml-1.5">Insert Row</span>
                       </button>
 
                       <button
                         onClick={onOpenAddCategoryModal}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-semibold border border-white/10 transition cursor-pointer"
+                        className="flex items-center justify-center p-2 sm:px-3 sm:py-1.5 rounded-[10px] bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-semibold border border-white/10 transition cursor-pointer"
+                        title="Advanced Category Modal"
                       >
-                        <PlusCircle className="w-3.5 h-3.5" />
-                        <span>Advanced Category Modal</span>
+                        <PlusCircle className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                        <span className="hidden sm:inline ml-1.5">Advanced Modal</span>
                       </button>
                     </div>
                   </td>
@@ -1739,7 +1631,7 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                     : '0%'}
                 </td>
                 <td className="py-3 px-3 text-center text-slate-400 text-[10px]">
-                  Zero-Based
+                  Balanced
                 </td>
               </tr>
             </tfoot>

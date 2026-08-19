@@ -367,6 +367,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     } else if (newType === 'home_loan') {
       setInterestRate('11.75');
       setMonthlyFee('69.00');
+      setBabyStepAssignments([6]);
     } else if (newType === 'vehicle_loan') {
       setInterestRate('12.50');
       setMonthlyFee('69.00');
@@ -374,6 +375,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     } else if (newType === 'loan') {
       setInterestRate('18.50');
       setMonthlyFee('69.00');
+    } else if (newType === 'savings') {
+      setBabyStepAssignments([1]);
+    } else if (newType === 'tax_free' || newType === 'investment') {
+      setBabyStepAssignments([4]);
     }
   };
 
@@ -725,9 +730,9 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               <div className="grid grid-cols-1 gap-2">
                 {[
                   { id: 1, label: "Baby Step 1: Starter Emergency Fund (R20,000 Target)" },
-                  { id: 3, label: "Baby Step 3: Fully Funded 3–6 Months Emergency Reserve" },
-                  { id: 4, label: "Baby Step 4: Children's College / Education Fund" },
-                  { id: 5, label: "Baby Step 5: 15% Retirement & Long-Term Wealth" },
+                  { id: 3, label: "Baby Step 3: Fully Funded 3–6 Months Emergency Fund" },
+                  { id: 4, label: "Baby Step 4: 15% Retirement & Long-Term Wealth" },
+                  { id: 5, label: "Baby Step 5: Children's College / Education Fund" },
                   { id: 6, label: "Baby Step 6: Pay Off Primary Home Bond Early" }
                 ].map((step) => {
                   const isSelected = babyStepAssignments.includes(step.id);

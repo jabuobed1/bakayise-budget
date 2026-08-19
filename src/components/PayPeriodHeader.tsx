@@ -33,10 +33,11 @@ export const PayPeriodHeader: React.FC<PayPeriodHeaderProps> = ({
         </div>
         <button
           onClick={onOpenNewPeriodModal}
-          className="flex items-center gap-2 px-3.5 py-2 bg-[#30D158] hover:bg-[#34C759] text-black font-bold rounded-[14px] text-xs transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+          className="flex items-center justify-center p-2.5 sm:px-3.5 sm:py-2 bg-[#30D158] hover:bg-[#34C759] text-black font-bold rounded-[14px] text-xs transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+          title="Create new pay cycle"
         >
-          <Plus className="w-4 h-4" strokeWidth={2.8} />
-          <span>Create Pay Cycle</span>
+          <Plus className="w-5 h-5 sm:w-4 sm:h-4" strokeWidth={2.8} />
+          <span className="hidden sm:inline ml-2">Create Pay Cycle</span>
         </button>
       </div>
     );
@@ -205,10 +206,11 @@ export const PayPeriodHeader: React.FC<PayPeriodHeaderProps> = ({
 
             <button
               onClick={onOpenNewPeriodModal}
-              className="flex items-center gap-1 px-3 py-2 rounded-[12px] bg-[#30D158] hover:bg-[#34C759] text-black text-xs font-bold transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+              className="flex items-center justify-center p-2 rounded-[12px] sm:px-3 sm:py-2 bg-[#30D158] hover:bg-[#34C759] text-black text-xs font-bold transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+              title="Start new pay cycle"
             >
-              <Plus className="w-3.5 h-3.5" strokeWidth={2.8} />
-              <span>New Cycle</span>
+              <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5" strokeWidth={2.8} />
+              <span className="hidden sm:inline ml-1">New Cycle</span>
             </button>
           </div>
 

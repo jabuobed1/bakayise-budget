@@ -294,42 +294,62 @@ export const WorkspaceSelectorModal: React.FC<WorkspaceSelectorModalProps> = ({ 
               })}
             </div>
 
-            {/* Section 2: Available Family Workspaces to Join */}
+            {/* Section 2: Other Workspaces */}
             {availablePublicWorkspaces.length > 0 && (
-              <div className="space-y-2 pt-2 border-t border-white/10">
-                <div className="flex items-center gap-2 px-1 text-emerald-400">
-                  <Users className="w-4 h-4" />
-                  <span className="text-[11px] font-bold uppercase tracking-wider">
-                    Available Family Workspaces ({availablePublicWorkspaces.length})
+              <div className="space-y-3 pt-3 border-t border-white/10">
+                <div className="flex items-center justify-between px-1 text-slate-400">
+                  <div className="flex items-center gap-2 text-slate-300 font-bold text-[11px] uppercase tracking-wider">
+                    <Users className="w-4 h-4 text-emerald-400" />
+                    <span>Other Workspaces ({availablePublicWorkspaces.length})</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    Existing workspaces in database
                   </span>
                 </div>
 
                 <div className="space-y-2">
-                  {availablePublicWorkspaces.map((ws) => (
-                    <div
-                      key={ws.id}
-                      className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/5 to-teal-500/5 border border-emerald-500/20 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-white truncate">{ws.name}</h4>
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold flex items-center gap-1">
-                            <Globe className="w-2.5 h-2.5" /> Family Public
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-400 truncate mt-0.5">
-                          Created by: {ws.lastEditedBy || 'Family Member'}
-                        </p>
-                      </div>
-
-                      <button
-                        onClick={() => joinWorkspace(ws.id)}
-                        className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold shadow-md shadow-emerald-500/20 transition cursor-pointer shrink-0"
+                  {availablePublicWorkspaces.map((ws) => {
+                    const isWsPrivate = ws.isPrivate === true;
+                    return (
+                      <div
+                        key={ws.id}
+                        className="p-4 rounded-2xl bg-white/[0.02] hover:bg-white/[0.04] border border-white/10 flex items-center justify-between gap-3 transition"
                       >
-                        Access / Join
-                      </button>
-                    </div>
-                  ))}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-sm font-bold text-white truncate">{ws.name}</h4>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 ${
+                                isWsPrivate
+                                  ? 'bg-amber-500/20 text-amber-300'
+                                  : 'bg-emerald-500/20 text-emerald-300'
+                              }`}
+                            >
+                              {isWsPrivate ? <Lock className="w-2.5 h-2.5" /> : <Globe className="w-2.5 h-2.5" />}
+                              {isWsPrivate ? 'Private' : 'Family Public'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                            ID: <code className="font-mono text-emerald-400">{ws.id}</code>
+                            {ws.lastEditedBy ? ` · By: ${ws.lastEditedBy}` : ''}
+                            {ws.updatedAt ? ` · Updated: ${new Date(ws.updatedAt).toLocaleDateString()}` : ''}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={async () => {
+                              await joinWorkspace(ws.id);
+                            }}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold shadow-md shadow-emerald-500/20 transition cursor-pointer flex items-center gap-1.5"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            <span>Access / Switch</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

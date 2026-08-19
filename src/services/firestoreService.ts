@@ -1571,18 +1571,24 @@ export async function syncUserProfile(): Promise<void> {
     const profileRef = doc(db, 'user_profiles', currentUser.uid);
     const audit = getAuditFields();
 
-    const profileData: UserProfile = {
+    const existingSnap = await getDoc(profileRef);
+    const existingData = existingSnap.exists() ? (existingSnap.data() as Partial<UserProfile>) : {};
+
+    const profileData: Partial<UserProfile> = {
       uid: currentUser.uid,
       email: email,
       displayName: member.displayName || currentUser.displayName || member.role,
       role: member.role,
-      householdId: 'shared_family_workspace',
+      householdId: existingData.householdId || existingData.activeWorkspaceId || 'shared_family_workspace',
       linkedUserIds: ['jabuobed1_uid', 'lumzayopa_uid'],
       avatarColor: member.avatarColor,
-      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       ...audit,
     };
+
+    if (!existingSnap.exists()) {
+      profileData.createdAt = new Date().toISOString();
+    }
 
     await setDoc(profileRef, cleanFirestoreObject(profileData), { merge: true });
   } catch (error) {
@@ -1762,40 +1768,146 @@ export async function deleteArchivedWorksheet(archiveId: string): Promise<void> 
 export interface UserWorkspacesResult {
   joined: Workspace[];
   availablePublic: Workspace[];
+  allWorkspaces: Workspace[];
+}
+
+/**
+ * Checks if a workspace belongs to the user based on uid, owner, memberIds, email, or profile ids
+ */
+export function isUserWorkspace(
+  ws: Workspace,
+  userId: string,
+  userEmail?: string,
+  profileWorkspaceIds?: string[]
+): boolean {
+  if (!ws) return false;
+  const emailLower = userEmail?.trim().toLowerCase();
+  
+  if (ws.ownerId === userId || ws.userId === userId) return true;
+  if (Array.isArray(ws.memberIds) && ws.memberIds.includes(userId)) return true;
+  if (
+    emailLower &&
+    (ws.lastEditedByEmail?.trim().toLowerCase() === emailLower ||
+      (ws as any).ownerEmail?.trim().toLowerCase() === emailLower)
+  ) {
+    return true;
+  }
+  if (profileWorkspaceIds && Array.isArray(profileWorkspaceIds) && profileWorkspaceIds.includes(ws.id)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Real-time subscription to all workspaces in Firestore.
+ * Segregates into:
+ * - joined: Workspaces belonging to the user
+ * - availablePublic: All other workspaces existing in Firestore
+ * - allWorkspaces: All raw workspaces from Firestore
+ */
+export function subscribeToAllWorkspaces(
+  userId: string,
+  userEmail?: string,
+  profileWorkspaceIds?: string[],
+  onData?: (result: UserWorkspacesResult) => void,
+  onError?: (err: Error) => void
+) {
+  const colRef = collection(db, 'workspaces');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const allWorkspaces: Workspace[] = [];
+      const joined: Workspace[] = [];
+      const availablePublic: Workspace[] = [];
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Workspace;
+        const ws: Workspace = { ...data, id: docSnap.id };
+        allWorkspaces.push(ws);
+
+        if (isUserWorkspace(ws, userId, userEmail, profileWorkspaceIds)) {
+          joined.push(ws);
+        } else {
+          availablePublic.push(ws);
+        }
+      });
+
+      // Sort newest updated/created first
+      joined.sort(
+        (a, b) =>
+          new Date(b.updatedAt || b.createdAt || 0).getTime() -
+          new Date(a.updatedAt || a.createdAt || 0).getTime()
+      );
+      availablePublic.sort(
+        (a, b) =>
+          new Date(b.updatedAt || b.createdAt || 0).getTime() -
+          new Date(a.updatedAt || a.createdAt || 0).getTime()
+      );
+      allWorkspaces.sort(
+        (a, b) =>
+          new Date(b.updatedAt || b.createdAt || 0).getTime() -
+          new Date(a.updatedAt || a.createdAt || 0).getTime()
+      );
+
+      if (onData) {
+        onData({ joined, availablePublic, allWorkspaces });
+      }
+    },
+    (error) => {
+      if (onError) onError(error);
+      console.warn('Firestore onSnapshot error [workspaces]:', error.message);
+    }
+  );
 }
 
 /**
  * Fetches all workspaces for a user:
- * - joined: Workspaces where user is in memberIds
- * - availablePublic: Non-private workspaces where user is NOT yet in memberIds (can be joined/accessed)
+ * - joined: Workspaces belonging to the user
+ * - availablePublic: All other workspaces in Firestore
  */
-export async function fetchAllUserWorkspaces(userId: string): Promise<UserWorkspacesResult> {
+export async function fetchAllUserWorkspaces(
+  userId: string,
+  userEmail?: string,
+  profileWorkspaceIds?: string[]
+): Promise<UserWorkspacesResult> {
   try {
     const snap = await getDocs(collection(db, 'workspaces'));
+    const allWorkspaces: Workspace[] = [];
     const joined: Workspace[] = [];
     const availablePublic: Workspace[] = [];
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as Workspace;
       const ws: Workspace = { ...data, id: docSnap.id };
-      const isMember = Array.isArray(ws.memberIds) && ws.memberIds.includes(userId);
+      allWorkspaces.push(ws);
 
-      if (isMember) {
+      if (isUserWorkspace(ws, userId, userEmail, profileWorkspaceIds)) {
         joined.push(ws);
-      } else if (ws.isPrivate !== true) {
-        // Public / shared family workspace
+      } else {
         availablePublic.push(ws);
       }
     });
 
-    // Sort joined by updatedAt descending
-    joined.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
-    availablePublic.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+    joined.sort(
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt || 0).getTime() -
+        new Date(a.updatedAt || a.createdAt || 0).getTime()
+    );
+    availablePublic.sort(
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt || 0).getTime() -
+        new Date(a.updatedAt || a.createdAt || 0).getTime()
+    );
+    allWorkspaces.sort(
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt || 0).getTime() -
+        new Date(a.updatedAt || a.createdAt || 0).getTime()
+    );
 
-    return { joined, availablePublic };
+    return { joined, availablePublic, allWorkspaces };
   } catch (err) {
     console.error('Error fetching all user workspaces:', err);
-    return { joined: [], availablePublic: [] };
+    return { joined: [], availablePublic: [], allWorkspaces: [] };
   }
 }
 
