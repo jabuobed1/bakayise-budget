@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { EmergencyFundLog, BabyStepsState } from '../../types';
+import { EmergencyFundLog, BabyStepsState, BudgetCategory, FinancialAccount } from '../../types';
 import { evaluateMathExpression, formatMathLivePreview, isMathExpression } from '../../utils/mathEvaluator';
 import { FigmaIcon } from '../ui/FigmaIcon';
 import { X, ArrowDownLeft, ArrowUpRight, Calculator } from 'lucide-react';
@@ -9,8 +9,12 @@ interface EmergencyFundModalProps {
   isOpen: boolean;
   onClose: () => void;
   step: 1 | 3;
-  babyState: BabyStepsState | null;
-  onSaveLog: (log: EmergencyFundLog, updatedState: BabyStepsState) => void;
+  babyState?: BabyStepsState | null;
+  currentState?: BabyStepsState | null;
+  categories?: BudgetCategory[];
+  accounts?: FinancialAccount[];
+  onSaveLog?: (log: EmergencyFundLog, updatedState: BabyStepsState) => void;
+  onSaveLogs?: (updatedState: BabyStepsState, newLog: EmergencyFundLog) => void;
 }
 
 export const EmergencyFundModal: React.FC<EmergencyFundModalProps> = ({
@@ -18,14 +22,19 @@ export const EmergencyFundModal: React.FC<EmergencyFundModalProps> = ({
   onClose,
   step,
   babyState,
+  currentState,
+  categories = [],
+  accounts = [],
   onSaveLog,
+  onSaveLogs,
 }) => {
+  const activeBabyState = babyState || currentState;
   const [type, setType] = useState<'deposit' | 'withdrawal'>('deposit');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
 
-  if (!isOpen || !babyState) return null;
+  if (!isOpen || !activeBabyState) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,23 +51,28 @@ export const EmergencyFundModal: React.FC<EmergencyFundModalProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    let updatedState = { ...babyState };
+    let updatedState = { ...activeBabyState };
 
     if (step === 1) {
-      const current = babyState.step1CurrentBalance || 0;
+      const current = activeBabyState.step1CurrentBalance || 0;
       const newBal = type === 'deposit' ? current + numAmount : Math.max(0, current - numAmount);
       updatedState.step1CurrentBalance = newBal;
-      if (newBal >= (babyState.step1EmergencyFundTarget || 20000)) {
+      if (newBal >= (activeBabyState.step1EmergencyFundTarget || 20000)) {
         confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 } });
       }
     } else {
-      const current = babyState.step3CurrentBalance || 0;
+      const current = activeBabyState.step3CurrentBalance || 0;
       const newBal = type === 'deposit' ? current + numAmount : Math.max(0, current - numAmount);
       updatedState.step3CurrentBalance = newBal;
     }
 
     updatedState.updatedAt = new Date().toISOString();
-    onSaveLog(log, updatedState);
+    if (onSaveLog) {
+      onSaveLog(log, updatedState);
+    }
+    if (onSaveLogs) {
+      onSaveLogs(updatedState, log);
+    }
     onClose();
   };
 

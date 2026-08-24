@@ -10,6 +10,9 @@ import {
   subscribeToIncomes,
   subscribeToCategories,
   subscribeToExpenses,
+  subscribeToAllWorkspaceIncomes,
+  subscribeToAllWorkspaceCategories,
+  subscribeToAllWorkspaceExpenses,
   subscribeToDebts,
   subscribeToBabyStepsState,
   subscribeToEmergencyFundLogs,
@@ -120,6 +123,9 @@ function BakayiseAppContent() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [allWorkspaceIncomes, setAllWorkspaceIncomes] = useState<Income[]>([]);
+  const [allWorkspaceCategories, setAllWorkspaceCategories] = useState<BudgetCategory[]>([]);
+  const [allWorkspaceExpenses, setAllWorkspaceExpenses] = useState<Expense[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
   const [babyState, setBabyState] = useState<BabyStepsState | null>(null);
@@ -220,6 +226,18 @@ function BakayiseAppContent() {
       setArchivedWorksheets(loadedArchives);
     });
 
+    const unsubAllIncomes = subscribeToAllWorkspaceIncomes(activeWorkspaceId, (loaded) => {
+      setAllWorkspaceIncomes(loaded);
+    });
+
+    const unsubAllCategories = subscribeToAllWorkspaceCategories(activeWorkspaceId, (loaded) => {
+      setAllWorkspaceCategories(loaded);
+    });
+
+    const unsubAllExpenses = subscribeToAllWorkspaceExpenses(activeWorkspaceId, (loaded) => {
+      setAllWorkspaceExpenses(loaded);
+    });
+
     return () => {
       unsubPeriods();
       unsubDebts();
@@ -227,6 +245,9 @@ function BakayiseAppContent() {
       unsubBaby();
       unsubLogs();
       unsubArchives();
+      unsubAllIncomes();
+      unsubAllCategories();
+      unsubAllExpenses();
     };
   }, [selectedPeriodId, isAuthorized, activeWorkspaceId]);
 
@@ -288,15 +309,34 @@ function BakayiseAppContent() {
       .reduce((sum, d) => sum + d.balance, 0);
   }, [debts]);
 
+  // Compute live real-time balances for all accounts across all pay cycles
+  const accountLiveBalances = useMemo(() => {
+    const map: Record<string, number> = {};
+    const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
+
+    for (const acc of accounts) {
+      const linkedIncomes = allWorkspaceIncomes.filter(
+        (i) => (i.accountId || defaultAccId) === acc.id && i.status === 'received'
+      );
+      const linkedExpenses = allWorkspaceExpenses.filter(
+        (e) => (e.accountId || defaultAccId) === acc.id
+      );
+      const inSum = linkedIncomes.reduce((s, i) => s + (i.amount || 0), 0);
+      const outSum = linkedExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+      map[acc.id] = (acc.openingBalance || 0) + inSum - outSum;
+    }
+    return map;
+  }, [accounts, allWorkspaceIncomes, allWorkspaceExpenses]);
+
   const totalBankBalance = useMemo(() => {
     return accounts.reduce((sum, acc) => {
       // Only count positive asset accounts for "total bank balance"
       if (acc.type === 'cheque' || acc.type === 'savings' || acc.type === 'cash' || acc.type === 'tax_free' || acc.type === 'investment' || acc.type === 'other') {
-        return sum + (acc.openingBalance || 0);
+        return sum + (accountLiveBalances[acc.id] ?? (acc.openingBalance || 0));
       }
       return sum;
     }, 0);
-  }, [accounts]);
+  }, [accounts, accountLiveBalances]);
 
   const unassigned = totalPlannedIncome - totalAllocated;
 
@@ -339,10 +379,41 @@ function BakayiseAppContent() {
 
   // Quick inline update income fields (amount, title, tag, accountId, status, etc.)
   const handleUpdateIncome = async (incId: string, updates: Partial<Income>) => {
+    const inc = incomes.find((i) => i.id === incId) || allWorkspaceIncomes.find((i) => i.id === incId);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
+
+    let receivedDate = updates.receivedDate;
+    if (updates.status === 'received' && !receivedDate) {
+      receivedDate = inc?.receivedDate || todayStr;
+    } else if (updates.status === 'expected') {
+      receivedDate = undefined;
+    }
+
     await updateIncome(incId, {
       ...updates,
+      accountId: updates.accountId || inc?.accountId || defaultAccId,
+      receivedDate,
       updatedAt: new Date().toISOString(),
     });
+  };
+
+  // Toggle Income Status between 'expected' and 'received' with real-time account balancing
+  const handleToggleIncomeStatus = async (inc: Income) => {
+    const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
+    const targetAccountId = inc.accountId || defaultAccId;
+    const newStatus: 'expected' | 'received' = inc.status === 'received' ? 'expected' : 'received';
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const updatedIncome: Income = {
+      ...inc,
+      accountId: targetAccountId,
+      status: newStatus,
+      receivedDate: newStatus === 'received' ? (inc.receivedDate || todayStr) : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveIncome(updatedIncome);
   };
 
   // Quick insert row from spreadsheet bottom
@@ -865,13 +936,7 @@ function BakayiseAppContent() {
               onInsertIncomeAt={handleInsertIncomeAt}
               onDuplicateIncome={handleDuplicateIncome}
               onReorderIncomes={handleReorderIncomes}
-              onToggleIncomeStatus={(inc) =>
-                saveIncome({
-                  ...inc,
-                  status: inc.status === 'received' ? 'expected' : 'received',
-                  updatedAt: new Date().toISOString(),
-                })
-              }
+              onToggleIncomeStatus={handleToggleIncomeStatus}
               onQuickLogExpense={(catId) => {
                 setEditingExpense(null);
                 setQuickCategoryId(catId);
@@ -912,16 +977,18 @@ function BakayiseAppContent() {
 
           {activeTab === 'transactions' && (
             <TransactionsView
-              expenses={expenses}
-              incomes={incomes}
+              expenses={allWorkspaceExpenses}
+              incomes={allWorkspaceIncomes}
               accounts={accounts}
-              categories={categories}
+              categories={allWorkspaceCategories}
+              periods={periods}
+              currentPeriodId={currentPeriod?.id}
               onDeleteExpense={(id) => {
-                const exp = expenses.find((e) => e.id === id);
+                const exp = allWorkspaceExpenses.find((e) => e.id === id);
                 deleteExpense(id, exp?.transferId);
               }}
               onDeleteIncome={(id) => {
-                const inc = incomes.find((i) => i.id === id);
+                const inc = allWorkspaceIncomes.find((i) => i.id === id);
                 deleteIncome(id, inc?.transferId);
               }}
             />
@@ -931,9 +998,10 @@ function BakayiseAppContent() {
           {activeTab === 'accounts' && (
             <AccountsManager
               accounts={accounts}
-              incomes={incomes}
-              expenses={expenses}
-              categories={categories}
+              incomes={allWorkspaceIncomes}
+              expenses={allWorkspaceExpenses}
+              categories={allWorkspaceCategories}
+              periods={periods}
               onOpenAddAccountModal={() => {
                 setEditingAccount(null);
                 setIsAccountModalOpen(true);
@@ -970,6 +1038,8 @@ function BakayiseAppContent() {
               debts={debts}
               categories={categories}
               incomes={incomes}
+              allIncomes={allWorkspaceIncomes}
+              allExpenses={allWorkspaceExpenses}
               currentPeriod={currentPeriod}
               emergencyLogs={emergencyLogs}
               accounts={accounts}
@@ -1004,25 +1074,53 @@ function BakayiseAppContent() {
                 setIsDebtModalOpen(true);
               }}
               onDeleteDebt={(debtId) => deleteDebt(debtId)}
-              onRecordPayment={(debtId, amount) => {
+              onRecordPayment={async (debtId, amount) => {
                 const targetDebt = debts.find((d) => d.id === debtId);
-                if (targetDebt) {
+                if (targetDebt && currentPeriod && activeWorkspaceId) {
                   const newBalance = Math.max(0, targetDebt.balance - amount);
-                  updateDebt(debtId, {
+                  await updateDebt(debtId, {
                     balance: newBalance,
                     status: newBalance === 0 ? 'paid_off' : 'active',
                     paidOffDate: newBalance === 0 ? new Date().toISOString().split('T')[0] : undefined,
                     updatedAt: new Date().toISOString(),
                   });
+
+                  // Log debt payment as an Expense transaction
+                  const timestamp = Date.now();
+                  const todayStr = new Date().toISOString().split('T')[0];
+                  const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
+                  const debtCat = categories.find(
+                    (c) => c.group === 'debt_snowball' || c.name.toLowerCase().includes('debt')
+                  );
+
+                  const debtExpense: Expense = {
+                    id: `exp_debt_${debtId}_${timestamp}`,
+                    periodId: currentPeriod.id,
+                    categoryId: debtCat?.id || categories[0]?.id || 'cat_debt',
+                    amount: amount,
+                    title: `Debt Payment: ${targetDebt.name}`,
+                    date: todayStr,
+                    loggedBy: 'Shared',
+                    paymentMethod: 'electronic_transfer',
+                    accountId: defaultAccId,
+                    notes: `Snowball payment towards ${targetDebt.name}. Remaining balance: ${formatZAR(newBalance)}`,
+                    householdId: activeWorkspaceId,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  };
+                  await saveExpense(debtExpense);
                 }
               }}
-              onMarkPaidOff={(debtId) => {
-                updateDebt(debtId, {
-                  balance: 0,
-                  status: 'paid_off',
-                  paidOffDate: new Date().toISOString().split('T')[0],
-                  updatedAt: new Date().toISOString(),
-                });
+              onMarkPaidOff={async (debtId) => {
+                const targetDebt = debts.find((d) => d.id === debtId);
+                if (targetDebt) {
+                  await updateDebt(debtId, {
+                    balance: 0,
+                    status: 'paid_off',
+                    paidOffDate: new Date().toISOString().split('T')[0],
+                    updatedAt: new Date().toISOString(),
+                  });
+                }
               }}
             />
           )}
@@ -1166,6 +1264,7 @@ function BakayiseAppContent() {
             setTransferSourceAccountId(undefined);
           }}
           accounts={accounts}
+          accountBalances={accountLiveBalances}
           currentPeriod={currentPeriod}
           initialSourceAccountId={transferSourceAccountId}
           onExecuteTransfer={handleExecuteTransfer}
@@ -1178,6 +1277,7 @@ function BakayiseAppContent() {
             setDepositDestinationAccountId(undefined);
           }}
           accounts={accounts}
+          accountBalances={accountLiveBalances}
           currentPeriod={currentPeriod}
           initialDestinationAccountId={depositDestinationAccountId}
           onExecuteDeposit={handleExecuteDeposit}
@@ -1187,15 +1287,45 @@ function BakayiseAppContent() {
           isOpen={isEmergencyModalOpen}
           onClose={() => setIsEmergencyModalOpen(false)}
           step={emergencyModalStep}
+          babyState={babyState}
           currentState={babyState}
           categories={categories}
+          accounts={accounts}
           onSaveLogs={async (updatedState, newLog) => {
             if (activeWorkspaceId) {
               await saveBabyStepsState({
                 ...updatedState,
-                householdId: activeWorkspaceId
+                householdId: activeWorkspaceId,
               });
               await addEmergencyFundLog(newLog);
+
+              // If withdrawal, log as an Expense transaction
+              if (newLog.type === 'withdrawal' && currentPeriod) {
+                const timestamp = Date.now();
+                const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
+                const savingsAcc = accounts.find((a) => a.babyStepAssignment === emergencyModalStep || a.type === 'savings');
+                const targetAccountId = savingsAcc?.id || defaultAccId;
+                const efCategory = categories.find(
+                  (c) => c.group === 'savings_goals' || c.name.toLowerCase().includes('emergency')
+                );
+
+                const efExpense: Expense = {
+                  id: `exp_ef_${timestamp}`,
+                  periodId: currentPeriod.id,
+                  categoryId: efCategory?.id || categories[0]?.id || 'cat_emergency',
+                  amount: newLog.amount,
+                  title: `Emergency Fund: ${newLog.description}`,
+                  date: newLog.date,
+                  loggedBy: 'Shared',
+                  paymentMethod: 'electronic_transfer',
+                  accountId: targetAccountId,
+                  notes: `Step ${emergencyModalStep} Emergency Fund withdrawal: ${newLog.description}`,
+                  householdId: activeWorkspaceId,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+                await saveExpense(efExpense);
+              }
             }
           }}
         />

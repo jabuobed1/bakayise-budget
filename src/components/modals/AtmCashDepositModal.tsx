@@ -8,6 +8,7 @@ interface AtmCashDepositModalProps {
   isOpen: boolean;
   onClose: () => void;
   accounts: FinancialAccount[];
+  accountBalances?: Record<string, number>;
   currentPeriod: BudgetPeriod | null;
   initialDestinationAccountId?: string;
   onExecuteDeposit: (depositData: {
@@ -26,6 +27,7 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
   isOpen,
   onClose,
   accounts,
+  accountBalances,
   currentPeriod,
   initialDestinationAccountId,
   onExecuteDeposit,
@@ -35,6 +37,10 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
     (a) => a.type === 'cheque' || a.type === 'savings' || a.type === 'tax_free'
   );
   const cashAccounts = accounts.filter((a) => a.type === 'cash');
+
+  const getBalance = (acc: FinancialAccount) => {
+    return accountBalances?.[acc.id] ?? (acc.openingBalance || 0);
+  };
 
   const [destinationAccountId, setDestinationAccountId] = useState<string>(
     initialDestinationAccountId || bankAccounts[0]?.id || accounts[0]?.id || ''
@@ -164,7 +170,7 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
               >
                 {cashAccounts.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} ({formatZAR(c.openingBalance || 0)})
+                    {c.name} ({formatZAR(getBalance(c))})
                   </option>
                 ))}
               </select>
@@ -184,7 +190,7 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
             >
               {accounts.map((acc) => (
                 <option key={acc.id} value={acc.id}>
-                  {acc.name} ({acc.institution || 'Bank'})
+                  {acc.name} ({formatZAR(getBalance(acc))})
                 </option>
               ))}
             </select>

@@ -7,6 +7,7 @@ interface AccountTransferModalProps {
   isOpen: boolean;
   onClose: () => void;
   accounts: FinancialAccount[];
+  accountBalances?: Record<string, number>;
   currentPeriod: BudgetPeriod | null;
   initialSourceAccountId?: string;
   onExecuteTransfer: (transferData: {
@@ -23,6 +24,7 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
   isOpen,
   onClose,
   accounts,
+  accountBalances,
   currentPeriod,
   initialSourceAccountId,
   onExecuteTransfer,
@@ -44,9 +46,13 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
   const sourceAccount = accounts.find((a) => a.id === sourceAccountId);
   const destAccount = accounts.find((a) => a.id === destinationAccountId);
 
+  const getBalance = (acc: FinancialAccount) => {
+    return accountBalances?.[acc.id] ?? (acc.openingBalance || 0);
+  };
+
   const handleQuickPercent = (percent: number) => {
     if (!sourceAccount) return;
-    const bal = sourceAccount.openingBalance || 0;
+    const bal = getBalance(sourceAccount);
     if (bal > 0) {
       setAmount((bal * percent).toFixed(2));
     }
@@ -130,7 +136,7 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
               >
                 {accounts.map((acc) => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.name} ({formatZAR(acc.openingBalance || 0)})
+                    {acc.name} ({formatZAR(getBalance(acc))})
                   </option>
                 ))}
               </select>
@@ -158,7 +164,7 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
                   .filter((a) => a.id !== sourceAccountId)
                   .map((acc) => (
                     <option key={acc.id} value={acc.id}>
-                      {acc.name} ({formatZAR(acc.openingBalance || 0)})
+                      {acc.name} ({formatZAR(getBalance(acc))})
                     </option>
                   ))}
               </select>
@@ -173,7 +179,7 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
               </label>
               {sourceAccount && (
                 <span className="text-[10px] text-slate-400 font-mono">
-                  Available: {formatZAR(sourceAccount.openingBalance || 0)}
+                  Available: {formatZAR(getBalance(sourceAccount))}
                 </span>
               )}
             </div>

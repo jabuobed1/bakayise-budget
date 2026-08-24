@@ -491,10 +491,46 @@ export function subscribeToIncomes(
   );
 }
 
+export function subscribeToAllWorkspaceIncomes(
+  householdId: string,
+  onData: (incomes: Income[]) => void,
+  onError?: (err: Error) => void
+) {
+  const colRef = collection(db, 'incomes');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const incomes: Income[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Income;
+        if (
+          !householdId ||
+          !data.householdId ||
+          data.householdId === householdId ||
+          data.workspaceId === householdId ||
+          data.householdId === 'shared_family_workspace' ||
+          data.householdId === 'main'
+        ) {
+          incomes.push({ ...(data as Income), id: docSnap.id });
+        }
+      });
+      incomes.sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+        return (a.createdAt || '').localeCompare(b.createdAt || '');
+      });
+      onData(incomes);
+    },
+    (error) => {
+      if (onError) onError(error);
+      console.warn('Firestore onSnapshot error [all_incomes]:', error.message);
+    }
+  );
+}
+
 export async function saveIncome(income: Income): Promise<void> {
   const path = `incomes/${income.id}`;
   try {
-    const audit = getAuditFields();
+    const audit = getAuditFields(income.householdId);
     await setDoc(
       doc(db, 'incomes', income.id),
       cleanFirestoreObject({
@@ -584,10 +620,46 @@ export function subscribeToCategories(
   );
 }
 
+export function subscribeToAllWorkspaceCategories(
+  householdId: string,
+  onData: (categories: BudgetCategory[]) => void,
+  onError?: (err: Error) => void
+) {
+  const colRef = collection(db, 'budget_categories');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const categories: BudgetCategory[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as BudgetCategory;
+        if (
+          !householdId ||
+          !data.householdId ||
+          data.householdId === householdId ||
+          data.workspaceId === householdId ||
+          data.householdId === 'shared_family_workspace' ||
+          data.householdId === 'main'
+        ) {
+          categories.push({ ...(data as BudgetCategory), id: docSnap.id });
+        }
+      });
+      categories.sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+        return (a.createdAt || '').localeCompare(b.createdAt || '');
+      });
+      onData(categories);
+    },
+    (error) => {
+      if (onError) onError(error);
+      console.warn('Firestore onSnapshot error [all_categories]:', error.message);
+    }
+  );
+}
+
 export async function saveCategory(category: BudgetCategory): Promise<void> {
   const path = `budget_categories/${category.id}`;
   try {
-    const audit = getAuditFields();
+    const audit = getAuditFields(category.householdId);
     await setDoc(
       doc(db, 'budget_categories', category.id),
       cleanFirestoreObject({
@@ -605,7 +677,7 @@ export async function saveCategory(category: BudgetCategory): Promise<void> {
 export async function updateCategory(categoryId: string, updates: Partial<BudgetCategory>): Promise<void> {
   const path = `budget_categories/${categoryId}`;
   try {
-    const audit = getAuditFields();
+    const audit = getAuditFields(updates.householdId);
     await updateDoc(
       doc(db, 'budget_categories', categoryId),
       cleanFirestoreObject({
@@ -660,10 +732,44 @@ export function subscribeToExpenses(
   );
 }
 
+export function subscribeToAllWorkspaceExpenses(
+  householdId: string,
+  onData: (expenses: Expense[]) => void,
+  onError?: (err: Error) => void
+) {
+  const colRef = collection(db, 'expenses');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const expenses: Expense[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Expense;
+        if (
+          !householdId ||
+          !data.householdId ||
+          data.householdId === householdId ||
+          data.workspaceId === householdId ||
+          data.householdId === 'shared_family_workspace' ||
+          data.householdId === 'main'
+        ) {
+          expenses.push({ ...(data as Expense), id: docSnap.id });
+        }
+      });
+      // Sort newest expense first
+      expenses.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      onData(expenses);
+    },
+    (error) => {
+      if (onError) onError(error);
+      console.warn('Firestore onSnapshot error [all_expenses]:', error.message);
+    }
+  );
+}
+
 export async function saveExpense(expense: Expense): Promise<void> {
   const path = `expenses/${expense.id}`;
   try {
-    const audit = getAuditFields();
+    const audit = getAuditFields(expense.householdId);
     await setDoc(
       doc(db, 'expenses', expense.id),
       cleanFirestoreObject({
@@ -683,8 +789,8 @@ export async function batchSaveExpenses(expensesList: Expense[]): Promise<void> 
   const path = 'expenses/batch';
   try {
     const batch = writeBatch(db);
-    const audit = getAuditFields();
     for (const exp of expensesList) {
+      const audit = getAuditFields(exp.householdId);
       const ref = doc(db, 'expenses', exp.id);
       batch.set(
         ref,

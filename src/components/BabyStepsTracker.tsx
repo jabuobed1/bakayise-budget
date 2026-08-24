@@ -1,5 +1,5 @@
-import React from 'react';
-import { BabyStepsState, Debt, BudgetCategory, EmergencyFundLog, FinancialAccount, Income, BudgetPeriod } from '../types';
+import React, { useMemo } from 'react';
+import { BabyStepsState, Debt, BudgetCategory, EmergencyFundLog, FinancialAccount, Income, Expense, BudgetPeriod } from '../types';
 import { formatZAR, formatZARCompact, formatDateNice } from '../utils/southAfricaHolidays';
 import { FigmaIcon, FigmaIconName } from './ui/FigmaIcon';
 import {
@@ -26,6 +26,8 @@ interface BabyStepsTrackerProps {
   emergencyLogs: EmergencyFundLog[];
   accounts?: FinancialAccount[];
   incomes?: Income[];
+  allIncomes?: Income[];
+  allExpenses?: Expense[];
   currentPeriod?: BudgetPeriod | null;
   onOpenEmergencyModal: (step: 1 | 3) => void;
   onUpdateCurrentStep: (stepNumber: number) => void;
@@ -48,6 +50,8 @@ export const BabyStepsTracker: React.FC<BabyStepsTrackerProps> = ({
   emergencyLogs,
   accounts = [],
   incomes = [],
+  allIncomes,
+  allExpenses,
   currentPeriod,
   onOpenEmergencyModal,
   onUpdateCurrentStep,
@@ -55,13 +59,36 @@ export const BabyStepsTracker: React.FC<BabyStepsTrackerProps> = ({
 }) => {
   const currentStep = babyState?.currentStep || 1;
 
+  // Calculate live balances for each account from all transactions
+  const accountLiveBalances = useMemo(() => {
+    const map = new Map<string, number>();
+    const incs = allIncomes || incomes;
+    const exps = allExpenses || [];
+    const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
+
+    for (const acc of accounts) {
+      const linkedIncomes = incs.filter(
+        (i) => (i.accountId || defaultAccId) === acc.id && i.status === 'received'
+      );
+      const linkedExpenses = exps.filter(
+        (e) => (e.accountId || defaultAccId) === acc.id
+      );
+      const inSum = linkedIncomes.reduce((s, i) => s + (i.amount || 0), 0);
+      const outSum = linkedExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+      const liveBal = (acc.openingBalance || 0) + inSum - outSum;
+      map.set(acc.id, liveBal);
+    }
+    return map;
+  }, [accounts, allIncomes, incomes, allExpenses]);
+
   // Find accounts specifically assigned to Baby Steps
   const step1AssignedAccounts = accounts.filter(
     (a) => a.babyStepAssignment === 1 || (!a.babyStepAssignment && a.type === 'savings' && !babyState?.step1CurrentBalance)
   );
-  const step1AssignedTotal = accounts
-    .filter((a) => a.babyStepAssignment === 1)
-    .reduce((sum, a) => sum + (a.openingBalance || 0), 0);
+  const step1AssignedTotal = step1AssignedAccounts.reduce(
+    (sum, a) => sum + (accountLiveBalances.get(a.id) ?? (a.openingBalance || 0)),
+    0
+  );
 
   // Step 1: Starter Emergency Fund (R20,000 in South Africa)
   const step1Target = babyState?.step1EmergencyFundTarget || 20000;
@@ -86,7 +113,7 @@ export const BabyStepsTracker: React.FC<BabyStepsTrackerProps> = ({
     (a) => a.babyStepAssignment === 3 || (a as any).babyStepAssignments?.includes(3)
   );
   const step3AssignedTotal = step3AssignedAccounts.reduce(
-    (sum, a) => sum + (a.openingBalance || 0),
+    (sum, a) => sum + (accountLiveBalances.get(a.id) ?? (a.openingBalance || 0)),
     0
   );
 
@@ -144,7 +171,10 @@ export const BabyStepsTracker: React.FC<BabyStepsTrackerProps> = ({
   const step4AssignedAccounts = accounts.filter(
     (a) => a.babyStepAssignment === 4 || (a as any).babyStepAssignments?.includes(4)
   );
-  const step4AssignedTotal = step4AssignedAccounts.reduce((sum, a) => sum + (a.openingBalance || 0), 0);
+  const step4AssignedTotal = step4AssignedAccounts.reduce(
+    (sum, a) => sum + (accountLiveBalances.get(a.id) ?? (a.openingBalance || 0)),
+    0
+  );
 
   // Step 6: Bond / Mortgage accounts
   const bondAccounts = accounts.filter(

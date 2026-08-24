@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { FinancialAccount, Income, Expense, BudgetCategory, AccountType } from '../types';
+import { FinancialAccount, Income, Expense, BudgetCategory, AccountType, BudgetPeriod } from '../types';
 import { ACCOUNT_TYPES, SOUTH_AFRICAN_INSTITUTIONS } from '../utils/budgetConstants';
 import { formatZAR, formatZARCompact, formatDateNice } from '../utils/southAfricaHolidays';
 import { FigmaIcon } from './ui/FigmaIcon';
@@ -40,6 +40,7 @@ interface AccountsManagerProps {
   incomes: Income[];
   expenses: Expense[];
   categories: BudgetCategory[];
+  periods?: BudgetPeriod[];
   onOpenAddAccountModal: () => void;
   onOpenEditAccountModal: (account: FinancialAccount) => void;
   onDeleteAccount: (accountId: string) => void;
@@ -54,6 +55,7 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
   incomes,
   expenses,
   categories,
+  periods = [],
   onOpenAddAccountModal,
   onOpenEditAccountModal,
   onDeleteAccount,
@@ -263,6 +265,8 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
     const st = accountStats[activeLedgerAccount.id];
     if (!st) return [];
 
+    const periodMap = new Map<string, BudgetPeriod>((periods || []).map((p) => [p.id, p]));
+
     const items: {
       id: string;
       date: string;
@@ -275,13 +279,14 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
 
     // Add Incomes
     for (const inc of st.linkedIncomes) {
+      const p = inc.periodId ? periodMap.get(inc.periodId) : null;
       items.push({
         id: inc.id,
-        date: inc.expectedDate || inc.createdAt,
-        title: inc.title,
-        subtitle: `Income · ${inc.sourceTag || 'General'}`,
+        date: inc.receivedDate || inc.expectedDate || inc.createdAt,
+        title: inc.title || 'Income',
+        subtitle: `Income · ${inc.sourceTag || 'General'}${p?.name ? ` · ${p.name}` : ''}`,
         type: 'inflow',
-        amount: inc.amount,
+        amount: inc.amount || 0,
         isSettled: inc.status === 'received',
       });
     }
@@ -289,20 +294,21 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
     // Add Expenses
     for (const exp of st.linkedExpenses) {
       const cat = categoryMap.get(exp.categoryId);
+      const p = exp.periodId ? periodMap.get(exp.periodId) : null;
       items.push({
         id: exp.id,
         date: exp.date || exp.createdAt,
-        title: exp.description || cat?.name || 'Expense',
-        subtitle: `Expense · ${cat?.name || 'Uncategorized'}`,
+        title: exp.title || exp.description || cat?.name || 'Expense',
+        subtitle: `Expense · ${cat?.name || 'Uncategorized'}${p?.name ? ` · ${p.name}` : ''}`,
         type: 'outflow',
-        amount: exp.amount,
+        amount: exp.amount || 0,
         isSettled: true,
       });
     }
 
     // Sort newest date first
     return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [activeLedgerAccount, accountStats, categoryMap]);
+  }, [activeLedgerAccount, accountStats, categoryMap, periods]);
 
   return (
     <div className="space-y-6">
