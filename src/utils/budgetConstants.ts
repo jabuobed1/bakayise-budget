@@ -305,6 +305,7 @@ export const DEBT_CATEGORIES: { id: DebtCategory; label: string; icon: string }[
 export const PAYMENT_METHODS = [
   'Debit Card',
   'Credit Card',
+  'App Purchase',
   'EFT / Bank Transfer',
   'Cash',
   'SnapScan / Zapper',

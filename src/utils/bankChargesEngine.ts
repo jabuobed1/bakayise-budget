@@ -27,6 +27,9 @@ export type TransactionType =
   | 'retail_till_cashout'
   | 'debit_order'
   | 'card_purchase'
+  | 'app_purchase'
+  | 'card_declined_insufficient_funds'
+  | 'debit_order_rejected_insufficient_funds'
   | 'monthly_admin_fee';
 
 export interface BankFeeRule {
@@ -136,8 +139,26 @@ export const SA_BANK_PROFILES: Record<SABankCode, BankProfile> = {
         fixedFee: 0,
         notes: 'Always free',
       },
+      app_purchase: {
+        description: 'App purchase (Airtime, Prepaid Electricity, Vouchers, In-App Payments)',
+        calculateFee: () => 0,
+        fixedFee: 0,
+        notes: 'Free on Standard Bank App & Online Banking',
+      },
+      card_declined_insufficient_funds: {
+        description: 'Card / Online Payment Declined (Insufficient Funds)',
+        calculateFee: () => 8.5,
+        fixedFee: 8.5,
+        notes: 'R8.50 penalty fee per declined card/online transaction due to insufficient funds',
+      },
+      debit_order_rejected_insufficient_funds: {
+        description: 'Debit Order Rejected / Unpaid (Insufficient Funds)',
+        calculateFee: () => 8.5,
+        fixedFee: 8.5,
+        notes: 'R8.50 penalty fee per unpaid/disputed debit order',
+      },
       debit_order: {
-        description: 'Internal & External Debit Orders',
+        description: 'Internal & External Debit Orders (Successful)',
         calculateFee: () => 0,
         fixedFee: 0,
         notes: 'Free on Private Banking',

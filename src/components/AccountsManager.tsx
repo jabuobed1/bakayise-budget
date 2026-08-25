@@ -287,6 +287,7 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
       subtitle: string;
       type: 'inflow' | 'outflow';
       amount: number;
+      paymentMethod?: string;
       isSettled: boolean;
     }[] = [];
 
@@ -312,9 +313,10 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
         id: exp.id,
         date: exp.date || exp.createdAt,
         title: exp.title || exp.description || cat?.name || 'Expense',
-        subtitle: `Expense · ${cat?.name || 'Uncategorized'}${p?.name ? ` · ${p.name}` : ''}`,
+        subtitle: `Expense · ${cat?.name || 'Uncategorized'}${exp.paymentMethod ? ` · ${exp.paymentMethod}` : ''}${p?.name ? ` · ${p.name}` : ''}`,
         type: 'outflow',
         amount: exp.amount || 0,
+        paymentMethod: exp.paymentMethod,
         isSettled: true,
       });
     }

@@ -65,8 +65,6 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  if (!isOpen) return null;
-
   const destAccount = accounts.find((a) => a.id === destinationAccountId);
   const cashAccount = accounts.find((a) => a.id === cashAccountId);
   const parsedAmount = parseFloat(amount) || 0;
@@ -115,6 +113,8 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">

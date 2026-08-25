@@ -48,8 +48,6 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  if (!isOpen) return null;
-
   const sourceAccount = accounts.find((a) => a.id === sourceAccountId);
   const destAccount = accounts.find((a) => a.id === destinationAccountId);
 
@@ -121,6 +119,8 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
