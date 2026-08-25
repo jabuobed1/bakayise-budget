@@ -180,6 +180,11 @@ export const IncomeList: React.FC<IncomeListProps> = ({
                           {formatDateNice(inc.receivedDate)}
                         </span>
                       )}
+                      {inc.accountBalanceAtTransactionTime !== undefined && (
+                        <span className="text-[10px] font-mono text-emerald-400">
+                          Bal: {formatZAR(inc.accountBalanceAtTransactionTime)}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );

@@ -131,6 +131,9 @@ export interface Income extends EditAuditInfo {
   order?: number; // Position in Excel list
   notes?: string;
   transferId?: string; // Link related transfer entries
+  balanceBefore?: number; // Snapshot of account balance prior to receiving income
+  balanceAfter?: number; // Snapshot of account balance immediately following receiving income
+  accountBalanceAtTransactionTime?: number; // Balance at transaction time
   createdAt: string;
   updatedAt: string;
 }
@@ -166,6 +169,12 @@ export interface Expense extends EditAuditInfo {
   notes?: string;
   receiptUrl?: string;
   transferId?: string; // Link related transfer entries
+  linkedDebtId?: string; // Optional: Link to a Debt snowball item to deduct balance
+  targetAccountId?: string; // Optional: Destination account for internal transfers / card payoffs
+  transferType?: 'standard' | 'debt_payment' | 'internal_transfer';
+  balanceBefore?: number; // Snapshot of account balance prior to transaction
+  balanceAfter?: number; // Snapshot of account balance immediately following transaction
+  accountBalanceAtTransactionTime?: number; // Balance at transaction time
   createdAt: string;
   updatedAt: string;
 }

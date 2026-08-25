@@ -1,10 +1,11 @@
 {
   "projectId": "bakayise-budget",
-  "appId": "1:128570656924:web:53548a3152ae8209d78559",
+  "appId": "1:128570656924:web:b63a503ae48728cfd78559",
   "apiKey": "AIzaSyDe6jx6Dk8TgiPFe8K3ULSABhTG7X-_8u8",
   "authDomain": "bakayise-budget.firebaseapp.com",
   "firestoreDatabaseId": "(default)",
   "storageBucket": "bakayise-budget.firebasestorage.app",
   "messagingSenderId": "128570656924",
-  "measurementId": "G-N2M0RT35RH"
+  "measurementId": "",
+  "recaptchaSiteKey": ""
 }

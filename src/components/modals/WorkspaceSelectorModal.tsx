@@ -19,8 +19,10 @@ import {
   Settings,
   ChevronDown,
   ChevronUp,
+  RefreshCw,
 } from 'lucide-react';
 import { WorkspaceWizardModal } from './WorkspaceWizardModal';
+import { autoConsolidateFamilyWorkspaceData } from '../../services/firestoreService';
 
 interface WorkspaceSelectorModalProps {
   isOpen: boolean;
@@ -54,7 +56,35 @@ export const WorkspaceSelectorModal: React.FC<WorkspaceSelectorModalProps> = ({ 
   const [wizardTargetWsId, setWizardTargetWsId] = useState<string | undefined>(undefined);
   const [wizardTargetWsName, setWizardTargetWsName] = useState<string | undefined>(undefined);
 
+  // Sync / Consolidation state
+  const [isConsolidating, setIsConsolidating] = useState(false);
+  const [consolidateMessage, setConsolidateMessage] = useState<string | null>(null);
+
   if (!isOpen) return null;
+
+  const handleSyncAll = async () => {
+    if (!activeWorkspaceId || !user) return;
+    setIsConsolidating(true);
+    setConsolidateMessage(null);
+    try {
+      const res = await autoConsolidateFamilyWorkspaceData(activeWorkspaceId, {
+        uid: user.uid,
+        displayName: user.displayName,
+        email: user.email,
+      });
+      setConsolidateMessage(
+        res.consolidatedCount > 0
+          ? `Linked & unified ${res.consolidatedCount} items to this family workspace!`
+          : 'All family periods, accounts, and debts are already synchronized!'
+      );
+      setTimeout(() => setConsolidateMessage(null), 4000);
+    } catch (e: any) {
+      setConsolidateMessage('Failed to consolidate data: ' + (e.message || 'Unknown error'));
+      setTimeout(() => setConsolidateMessage(null), 4000);
+    } finally {
+      setIsConsolidating(false);
+    }
+  };
 
   const handleQuickCreate = async () => {
     if (!newWsName.trim()) return;

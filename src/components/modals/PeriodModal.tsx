@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { BudgetPeriod, BudgetCategory } from '../../types';
+import { BudgetPeriod, BudgetCategory, Debt, FinancialAccount } from '../../types';
 import {
   generatePayPeriodInfo,
   formatDateNice,
   formatDateFull,
+  formatZAR,
 } from '../../utils/southAfricaHolidays';
 import { FigmaIcon } from '../ui/FigmaIcon';
-import { X, Copy, AlertTriangle } from 'lucide-react';
+import { X, Copy, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 interface PeriodModalProps {
   isOpen: boolean;
@@ -16,6 +17,8 @@ interface PeriodModalProps {
   existingPeriods?: BudgetPeriod[];
   currentCategories?: BudgetCategory[];
   hasExistingCategories?: boolean;
+  debts?: Debt[];
+  accounts?: FinancialAccount[];
 }
 
 export const PeriodModal: React.FC<PeriodModalProps> = ({
@@ -26,6 +29,8 @@ export const PeriodModal: React.FC<PeriodModalProps> = ({
   existingPeriods = [],
   currentCategories = [],
   hasExistingCategories,
+  debts = [],
+  accounts = [],
 }) => {
   const now = new Date();
   const nextMonth = now.getMonth() === 11 ? 0 : now.getMonth() + 1;
@@ -43,6 +48,27 @@ export const PeriodModal: React.FC<PeriodModalProps> = ({
   const saveHandler = onSaveNewPeriod || onSave;
   const showCopyCheckbox = (currentCategories && currentCategories.length > 0) || !!hasExistingCategories;
   const categoryCount = currentCategories?.length || 0;
+
+  const activeDebts = debts.filter(
+    (d) => d.status !== 'paid_off' && (d.balance > 0 || d.minimumPayment > 0)
+  );
+
+  const installmentAccounts = accounts.filter(
+    (a) =>
+      (a.type === 'vehicle_loan' ||
+        a.type === 'home_loan' ||
+        (a.manualMonthlyInstallment && a.manualMonthlyInstallment > 0) ||
+        (a.monthlyInstallment && a.monthlyInstallment > 0)) &&
+      !debts.some((d) => d.linkedAccountId === a.id)
+  );
+
+  const totalMinimumObligations =
+    activeDebts.reduce((sum, d) => sum + (d.minimumPayment || 0), 0) +
+    installmentAccounts.reduce(
+      (sum, a) =>
+        sum + (a.manualMonthlyInstallment || a.monthlyInstallment || a.minimumPaymentAmount || 0),
+      0
+    );
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -181,6 +207,25 @@ export const PeriodModal: React.FC<PeriodModalProps> = ({
             </div>
           </div>
 
+          {/* Debt Snowball & Vehicle Installments Auto-Population Notice */}
+          {(activeDebts.length > 0 || installmentAccounts.length > 0) && (
+            <div className="bg-[#1C1C1E] border border-blue-500/30 rounded-[16px] p-3.5 flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <span className="font-bold text-white block">
+                  Automatic Debt & Installment Protection
+                </span>
+                <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                  The system will automatically include minimum payment entries for your{' '}
+                  <strong className="text-blue-300">
+                    {activeDebts.length + installmentAccounts.length} debt/installment obligations
+                  </strong>{' '}
+                  (totaling {formatZAR(totalMinimumObligations)}), skipping any that are already in your budget envelopes.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Copy Envelopes checkbox */}
           {showCopyCheckbox && (
             <div className="bg-[#2C2C2E]/80 border border-white/10 rounded-[16px] p-3.5">
@@ -197,7 +242,7 @@ export const PeriodModal: React.FC<PeriodModalProps> = ({
                     <span>Copy current {categoryCount > 0 ? `${categoryCount} ` : ''}category envelopes</span>
                   </span>
                   <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                    Pre-fills your existing budget envelopes and allocations so you don't have to recreate them from scratch.
+                    Pre-fills your existing budget envelopes and allocations so you don&apos;t have to recreate them from scratch.
                   </p>
                 </div>
               </label>

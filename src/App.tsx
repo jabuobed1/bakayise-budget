@@ -20,9 +20,11 @@ import {
   saveBudgetPeriod,
   deleteBudgetPeriod,
   saveIncome,
+  saveIncomesBulk,
   updateIncome,
   deleteIncome,
   saveCategory,
+  saveCategoriesBulk,
   updateCategory,
   deleteCategory,
   saveExpense,
@@ -89,6 +91,7 @@ import { EmergencyFundModal } from './components/modals/EmergencyFundModal';
 import { DebtModal } from './components/modals/DebtModal';
 import { ResetWorksheetModal } from './components/modals/ResetWorksheetModal';
 import { ArchivedWorksheetsModal } from './components/modals/ArchivedWorksheetsModal';
+import { WorkspaceGatekeeperModal } from './components/modals/WorkspaceGatekeeperModal';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { GoogleAuthScreen } from './components/auth/GoogleAuthScreen';
 
@@ -173,18 +176,44 @@ function BakayiseAppContent() {
       setLoading(false);
       return;
     }
+    let isMounted = true;
+    const fallbackTimer = setTimeout(() => {
+      if (isMounted) setLoading(false);
+    }, 4000);
+
     async function init() {
-      await testConnection();
-      await syncUserProfile();
-      await checkAndSeedInitialData();
-      setLoading(false);
+      try {
+        await testConnection();
+        await syncUserProfile();
+        await checkAndSeedInitialData();
+      } catch (err) {
+        console.warn('Initial seed error or offline fallback:', err);
+      } finally {
+        if (isMounted) {
+          clearTimeout(fallbackTimer);
+          setLoading(false);
+        }
+      }
     }
     init();
+
+    return () => {
+      isMounted = false;
+      clearTimeout(fallbackTimer);
+    };
   }, [isAuthorized]);
 
   // Subscribe to Periods, Debts, Accounts, BabySteps, EmergencyLogs, ArchivedWorksheets
   useEffect(() => {
-    if (!isAuthorized || !activeWorkspaceId) return;
+    if (!isAuthorized || !activeWorkspaceId) {
+      setPeriods([]);
+      setDebts([]);
+      setAccounts([]);
+      setBabyState(null);
+      setEmergencyLogs([]);
+      setSelectedPeriodId(null);
+      return;
+    }
 
     const unsubPeriods = subscribeToBudgetPeriods(activeWorkspaceId, (loadedPeriods) => {
       setPeriods(loadedPeriods);
@@ -194,15 +223,18 @@ function BakayiseAppContent() {
           (p) => p.startDate <= todayStr && todayStr <= p.endDate
         );
 
-        if (!selectedPeriodId || !loadedPeriods.some((p) => p.id === selectedPeriodId)) {
+        setSelectedPeriodId((prevSelected) => {
+          if (prevSelected && loadedPeriods.some((p) => p.id === prevSelected)) {
+            return prevSelected;
+          }
           const defaultPeriod =
             currentByDate ||
             loadedPeriods.find((p) => p.status === 'active') ||
             loadedPeriods[0];
-          if (defaultPeriod) {
-            setSelectedPeriodId(defaultPeriod.id);
-          }
-        }
+          return defaultPeriod ? defaultPeriod.id : null;
+        });
+      } else {
+        setSelectedPeriodId(null);
       }
     });
 
@@ -309,12 +341,20 @@ function BakayiseAppContent() {
       .reduce((sum, d) => sum + d.balance, 0);
   }, [debts]);
 
-  // Compute live real-time balances for all accounts across all pay cycles
+  // Direct Balance Ledger: Account balances computed dynamically from baseline openingBalance + received incomes - actual expenses
   const accountLiveBalances = useMemo(() => {
     const map: Record<string, number> = {};
     const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
 
     for (const acc of accounts) {
+      const baseOwed =
+        acc.type === 'credit_card' ||
+        acc.type === 'loan' ||
+        acc.type === 'vehicle_loan' ||
+        acc.type === 'home_loan'
+          ? (acc.balanceOwed !== undefined ? acc.balanceOwed : acc.openingBalance || 0)
+          : acc.openingBalance || 0;
+
       const linkedIncomes = allWorkspaceIncomes.filter(
         (i) => (i.accountId || defaultAccId) === acc.id && i.status === 'received'
       );
@@ -323,7 +363,17 @@ function BakayiseAppContent() {
       );
       const inSum = linkedIncomes.reduce((s, i) => s + (i.amount || 0), 0);
       const outSum = linkedExpenses.reduce((s, e) => s + (e.amount || 0), 0);
-      map[acc.id] = (acc.openingBalance || 0) + inSum - outSum;
+
+      if (
+        acc.type === 'credit_card' ||
+        acc.type === 'loan' ||
+        acc.type === 'vehicle_loan' ||
+        acc.type === 'home_loan'
+      ) {
+        map[acc.id] = Math.max(0, baseOwed + outSum - inSum);
+      } else {
+        map[acc.id] = (acc.openingBalance || 0) + inSum - outSum;
+      }
     }
     return map;
   }, [accounts, allWorkspaceIncomes, allWorkspaceExpenses]);
@@ -331,7 +381,14 @@ function BakayiseAppContent() {
   const totalBankBalance = useMemo(() => {
     return accounts.reduce((sum, acc) => {
       // Only count positive asset accounts for "total bank balance"
-      if (acc.type === 'cheque' || acc.type === 'savings' || acc.type === 'cash' || acc.type === 'tax_free' || acc.type === 'investment' || acc.type === 'other') {
+      if (
+        acc.type === 'cheque' ||
+        acc.type === 'savings' ||
+        acc.type === 'cash' ||
+        acc.type === 'tax_free' ||
+        acc.type === 'investment' ||
+        acc.type === 'other'
+      ) {
         return sum + (accountLiveBalances[acc.id] ?? (acc.openingBalance || 0));
       }
       return sum;
@@ -340,26 +397,152 @@ function BakayiseAppContent() {
 
   const unassigned = totalPlannedIncome - totalAllocated;
 
-  // Handle save new period with optional category cloning
+  // Handle save new period with optional category cloning and automatic Debt Snowball / Installments population
   const handleSaveNewPeriod = async (
     newPeriod: BudgetPeriod,
     copyFromCategories: boolean
   ) => {
-    await saveBudgetPeriod(newPeriod);
-    setSelectedPeriodId(newPeriod.id);
+    if (!activeWorkspaceId) {
+      throw new Error('Cannot create period: No workspace selected.');
+    }
+    const periodToSave: BudgetPeriod = {
+      ...newPeriod,
+      householdId: activeWorkspaceId,
+      workspaceId: activeWorkspaceId,
+    };
+    await saveBudgetPeriod(periodToSave);
+    setSelectedPeriodId(periodToSave.id);
 
+    const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
+    const createdCategories: BudgetCategory[] = [];
+
+    // 1. Copy existing categories if requested
     if (copyFromCategories && categories.length > 0) {
       for (let i = 0; i < categories.length; i++) {
         const cat = categories[i];
         const clonedCat: BudgetCategory = {
           ...cat,
-          id: `cat_${newPeriod.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          periodId: newPeriod.id,
+          id: `cat_${periodToSave.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          periodId: periodToSave.id,
+          householdId: activeWorkspaceId,
+          workspaceId: activeWorkspaceId,
           order: i,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
+        createdCategories.push(clonedCat);
         await saveCategory(clonedCat);
+      }
+    }
+
+    const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // 2. Automatically populate Debt Snowball minimum payments for all active debts (if not already present)
+    const activeDebts = debts.filter(
+      (d) => d.status !== 'paid_off' && (d.balance > 0 || (d.minimumPayment && d.minimumPayment > 0))
+    );
+
+    for (const debt of activeDebts) {
+      const debtNorm = normalize(debt.name);
+      const lenderNorm = debt.lender ? normalize(debt.lender) : '';
+
+      const alreadyExists = createdCategories.some((cat) => {
+        const catNorm = normalize(cat.name);
+        return (
+          catNorm === debtNorm ||
+          (debtNorm.length > 3 && catNorm.includes(debtNorm)) ||
+          (catNorm.length > 3 && debtNorm.includes(catNorm)) ||
+          (lenderNorm.length > 3 && catNorm.includes(lenderNorm) && (cat.tag === 'debt' || cat.group === 'debt_snowball')) ||
+          (cat.defaultAccountId && debt.linkedAccountId && cat.defaultAccountId === debt.linkedAccountId && (cat.tag === 'debt' || cat.group === 'debt_snowball'))
+        );
+      });
+
+      if (!alreadyExists) {
+        const isCar =
+          debt.category === 'car_finance' ||
+          /car|vehicle|auto|polo|toyota|ford|wesbank|mfc|bmw|audi|hyundai|kia/i.test(debt.name);
+        const isBond = /bond|mortgage|home loan|property/i.test(debt.name);
+
+        const newDebtCat: BudgetCategory = {
+          id: `cat_${periodToSave.id}_debt_${debt.id}_${Date.now()}`,
+          periodId: periodToSave.id,
+          householdId: activeWorkspaceId,
+          workspaceId: activeWorkspaceId,
+          name: debt.name,
+          group: isCar ? 'transport' : isBond ? 'housing' : 'debt_snowball',
+          tag: isCar ? 'car_payment' : isBond ? 'bond' : 'debt',
+          allocatedAmount: Math.max(0, debt.minimumPayment || 0),
+          defaultAccountId: debt.linkedAccountId || defaultAccId,
+          color: isCar ? '#FF9F0A' : isBond ? '#0A84FF' : '#FF453A',
+          icon: isCar ? 'Car' : isBond ? 'Home' : 'CreditCard',
+          order: createdCategories.length,
+          isEssential: true,
+          isRecurring: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        createdCategories.push(newDebtCat);
+        await saveCategory(newDebtCat);
+      }
+    }
+
+    // 3. Automatically populate manual installments for liabilities / vehicle loans / bond accounts (if not already present)
+    const installmentAccounts = accounts.filter(
+      (a) =>
+        a.type === 'vehicle_loan' ||
+        a.type === 'home_loan' ||
+        a.type === 'loan' ||
+        (a.manualMonthlyInstallment && a.manualMonthlyInstallment > 0) ||
+        (a.monthlyInstallment && a.monthlyInstallment > 0)
+    );
+
+    for (const acc of installmentAccounts) {
+      const accNorm = normalize(acc.name);
+      const isAlreadyHandledByDebt = activeDebts.some(
+        (d) => d.linkedAccountId === acc.id || normalize(d.name) === accNorm
+      );
+
+      const alreadyExists =
+        isAlreadyHandledByDebt ||
+        createdCategories.some((cat) => {
+          const catNorm = normalize(cat.name);
+          return (
+            catNorm === accNorm ||
+            (accNorm.length > 3 && catNorm.includes(accNorm)) ||
+            (catNorm.length > 3 && accNorm.includes(catNorm)) ||
+            cat.defaultAccountId === acc.id
+          );
+        });
+
+      if (!alreadyExists) {
+        const isCar = acc.type === 'vehicle_loan' || /car|vehicle|auto|wesbank|mfc|toyota|polo/i.test(acc.name);
+        const isBond = acc.type === 'home_loan' || /bond|mortgage|home loan/i.test(acc.name);
+        const installmentAmt =
+          acc.manualMonthlyInstallment ||
+          acc.monthlyInstallment ||
+          acc.minimumPaymentAmount ||
+          0;
+
+        const newAccCat: BudgetCategory = {
+          id: `cat_${periodToSave.id}_acc_${acc.id}_${Date.now()}`,
+          periodId: periodToSave.id,
+          householdId: activeWorkspaceId,
+          workspaceId: activeWorkspaceId,
+          name: acc.name,
+          group: isCar ? 'transport' : isBond ? 'housing' : 'debt_snowball',
+          tag: isCar ? 'car_payment' : isBond ? 'bond' : 'debt',
+          allocatedAmount: Math.max(0, installmentAmt),
+          defaultAccountId: acc.id,
+          color: isCar ? '#FF9F0A' : isBond ? '#0A84FF' : '#FF453A',
+          icon: isCar ? 'Car' : isBond ? 'Home' : 'CreditCard',
+          order: createdCategories.length,
+          isEssential: true,
+          isRecurring: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        createdCategories.push(newAccCat);
+        await saveCategory(newAccCat);
       }
     }
   };
@@ -390,30 +573,71 @@ function BakayiseAppContent() {
       receivedDate = undefined;
     }
 
-    await updateIncome(incId, {
-      ...updates,
-      accountId: updates.accountId || inc?.accountId || defaultAccId,
-      receivedDate,
-      updatedAt: new Date().toISOString(),
-    });
+    if (inc) {
+      const fullIncome: Income = {
+        ...inc,
+        ...updates,
+        householdId: activeWorkspaceId || inc.householdId || inc.workspaceId || undefined,
+        workspaceId: activeWorkspaceId || inc.workspaceId || inc.householdId || undefined,
+        accountId: updates.accountId || inc.accountId || defaultAccId,
+        receivedDate,
+        updatedAt: new Date().toISOString(),
+      };
+      await saveIncome(fullIncome);
+    } else {
+      await updateIncome(incId, {
+        ...updates,
+        householdId: activeWorkspaceId || undefined,
+        workspaceId: activeWorkspaceId || undefined,
+        accountId: updates.accountId || defaultAccId,
+        receivedDate,
+        updatedAt: new Date().toISOString(),
+      });
+    }
   };
 
   // Toggle Income Status between 'expected' and 'received' with real-time account balancing
   const handleToggleIncomeStatus = async (inc: Income) => {
+    const startTime = performance.now();
     const defaultAccId = accounts.find((a) => a.isDefault)?.id || accounts[0]?.id;
     const targetAccountId = inc.accountId || defaultAccId;
     const newStatus: 'expected' | 'received' = inc.status === 'received' ? 'expected' : 'received';
     const todayStr = new Date().toISOString().split('T')[0];
 
+    console.log('[DEBUG LOG][App.tsx] handleToggleIncomeStatus START:', {
+      incomeId: inc.id,
+      incomeTitle: inc.title,
+      previousStatus: inc.status,
+      newStatus,
+      targetAccountId,
+      defaultAccId,
+      activeWorkspaceId,
+      currentPeriodId: currentPeriod?.id,
+      availableAccountsCount: accounts.length,
+      availableAccounts: accounts.map((a) => ({ id: a.id, name: a.name, currentBalance: a.currentBalance, openingBalance: a.openingBalance })),
+      timestamp: new Date().toISOString(),
+    });
+
     const updatedIncome: Income = {
       ...inc,
+      householdId: activeWorkspaceId || inc.householdId || inc.workspaceId || undefined,
+      workspaceId: activeWorkspaceId || inc.workspaceId || inc.householdId || undefined,
       accountId: targetAccountId,
       status: newStatus,
       receivedDate: newStatus === 'received' ? (inc.receivedDate || todayStr) : undefined,
       updatedAt: new Date().toISOString(),
     };
 
-    await saveIncome(updatedIncome);
+    console.log('[DEBUG LOG][App.tsx] Prepared updatedIncome payload for saveIncome:', updatedIncome);
+
+    try {
+      await saveIncome(updatedIncome);
+      const elapsed = (performance.now() - startTime).toFixed(2);
+      console.log(`[DEBUG LOG][App.tsx] handleToggleIncomeStatus COMPLETED successfully in ${elapsed}ms for income:`, inc.id);
+    } catch (err) {
+      const elapsed = (performance.now() - startTime).toFixed(2);
+      console.error(`[DEBUG LOG][App.tsx] handleToggleIncomeStatus FAILED in ${elapsed}ms:`, err);
+    }
   };
 
   // Quick insert row from spreadsheet bottom
@@ -557,6 +781,138 @@ function BakayiseAppContent() {
     setIncomes(reordered);
     const orderUpdates = reordered.map((inc, idx) => ({ id: inc.id, order: idx }));
     await batchUpdateIncomeOrders(orderUpdates);
+  };
+
+  // Sync Debt balance and Transfer accounts when saving expenses
+  const handleSaveExpenseWithSync = async (exp: Expense) => {
+    const oldExp = expenses.find((e) => e.id === exp.id) || allWorkspaceExpenses.find((e) => e.id === exp.id);
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // 1. Debt balance sync
+    if (exp.linkedDebtId) {
+      const targetDebt = debts.find((d) => d.id === exp.linkedDebtId);
+      if (targetDebt) {
+        if (oldExp && oldExp.linkedDebtId === exp.linkedDebtId) {
+          // Adjust difference on same debt
+          const delta = exp.amount - oldExp.amount;
+          const newBalance = Math.max(0, targetDebt.balance - delta);
+          await updateDebt(targetDebt.id, {
+            balance: newBalance,
+            status: newBalance === 0 ? 'paid_off' : 'active',
+            paidOffDate: newBalance === 0 ? (targetDebt.paidOffDate || todayStr) : undefined,
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          // Unlink old debt if previously linked to a different debt
+          if (oldExp?.linkedDebtId && oldExp.linkedDebtId !== exp.linkedDebtId) {
+            const oldDebt = debts.find((d) => d.id === oldExp.linkedDebtId);
+            if (oldDebt) {
+              const restoredBal = oldDebt.balance + oldExp.amount;
+              await updateDebt(oldDebt.id, {
+                balance: restoredBal,
+                status: 'active',
+                paidOffDate: undefined,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          }
+          // Deduct from newly linked debt
+          const newBalance = Math.max(0, targetDebt.balance - exp.amount);
+          await updateDebt(targetDebt.id, {
+            balance: newBalance,
+            status: newBalance === 0 ? 'paid_off' : 'active',
+            paidOffDate: newBalance === 0 ? (targetDebt.paidOffDate || todayStr) : undefined,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    } else if (oldExp?.linkedDebtId) {
+      // User unlinked the debt
+      const oldDebt = debts.find((d) => d.id === oldExp.linkedDebtId);
+      if (oldDebt) {
+        const restoredBal = oldDebt.balance + oldExp.amount;
+        await updateDebt(oldDebt.id, {
+          balance: restoredBal,
+          status: 'active',
+          paidOffDate: undefined,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    // 2. Internal Transfer sync (if targetAccountId is specified and internal transfer)
+    if (exp.targetAccountId && exp.transferType === 'internal_transfer') {
+      const sourceAcc = accounts.find((a) => a.id === exp.accountId);
+      const destAcc = accounts.find((a) => a.id === exp.targetAccountId);
+      if (sourceAcc && destAcc && currentPeriod) {
+        const transferId = exp.transferId || `transfer_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const transferExpense: Expense = {
+          ...exp,
+          transferId,
+        };
+        const transferIncome: Income = {
+          id: `inc_${transferId}`,
+          periodId: exp.periodId || currentPeriod.id,
+          title: `Transfer from ${sourceAcc.name}: ${exp.title}`,
+          amount: exp.amount,
+          type: 'other',
+          sourceTag: 'Internal Transfer',
+          status: 'received',
+          receivedDate: exp.date,
+          accountId: destAcc.id,
+          notes: exp.notes,
+          transferId: transferId,
+          householdId: activeWorkspaceId || undefined,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await executeTransfer(transferExpense, transferIncome);
+        return;
+      }
+    }
+
+    await saveExpense(exp);
+  };
+
+  // Sync Debt balance when batch saving multiple expenses
+  const handleBatchSaveExpensesWithSync = async (bulkExps: Expense[]) => {
+    for (const exp of bulkExps) {
+      if (exp.linkedDebtId) {
+        const targetDebt = debts.find((d) => d.id === exp.linkedDebtId);
+        if (targetDebt) {
+          const newBalance = Math.max(0, targetDebt.balance - exp.amount);
+          await updateDebt(targetDebt.id, {
+            balance: newBalance,
+            status: newBalance === 0 ? 'paid_off' : 'active',
+            paidOffDate: newBalance === 0 ? new Date().toISOString().split('T')[0] : undefined,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
+    await batchSaveExpenses(bulkExps);
+  };
+
+  // Sync Debt balance when deleting an expense
+  const handleDeleteExpenseWithSync = async (expId: string) => {
+    const exp = expenses.find((e) => e.id === expId) || allWorkspaceExpenses.find((e) => e.id === expId);
+    if (exp) {
+      if (exp.linkedDebtId) {
+        const targetDebt = debts.find((d) => d.id === exp.linkedDebtId);
+        if (targetDebt) {
+          const restoredBalance = targetDebt.balance + exp.amount;
+          await updateDebt(targetDebt.id, {
+            balance: restoredBalance,
+            status: 'active',
+            paidOffDate: undefined,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+      await deleteExpense(expId, exp.transferId);
+    } else {
+      await deleteExpense(expId);
+    }
   };
 
   // Quick Action Sheet Trigger Handler
@@ -890,7 +1246,10 @@ function BakayiseAppContent() {
           <PayPeriodHeader
             periods={periods}
             currentPeriod={currentPeriod}
-            onSelectPeriod={(p) => setSelectedPeriodId(p.id)}
+            onSelectPeriod={(p) => {
+              setSelectedPeriodId(p.id);
+              localStorage.setItem('bakayise_selected_period_id', p.id);
+            }}
             onOpenNewPeriodModal={() => setIsPeriodModalOpen(true)}
             onOpenCalendarModal={() => setIsCalendarModalOpen(true)}
             onOpenEditPeriodModal={() => setIsEditPeriodModalOpen(true)}
@@ -903,6 +1262,7 @@ function BakayiseAppContent() {
               incomes={incomes}
               expenses={expenses}
               accounts={accounts}
+              accountBalances={accountLiveBalances}
               periods={periods}
               currentPeriod={currentPeriod}
               onOpenAddCategoryModal={() => {
@@ -969,8 +1329,7 @@ function BakayiseAppContent() {
                 setIsExpenseModalOpen(true);
               }}
               onDeleteExpense={(expId) => {
-                const exp = expenses.find((e) => e.id === expId);
-                deleteExpense(expId, exp?.transferId);
+                handleDeleteExpenseWithSync(expId);
               }}
             />
           )}
@@ -981,11 +1340,11 @@ function BakayiseAppContent() {
               incomes={allWorkspaceIncomes}
               accounts={accounts}
               categories={allWorkspaceCategories}
+              debts={debts}
               periods={periods}
               currentPeriodId={currentPeriod?.id}
               onDeleteExpense={(id) => {
-                const exp = allWorkspaceExpenses.find((e) => e.id === id);
-                deleteExpense(id, exp?.transferId);
+                handleDeleteExpenseWithSync(id);
               }}
               onDeleteIncome={(id) => {
                 const inc = allWorkspaceIncomes.find((i) => i.id === id);
@@ -1186,10 +1545,11 @@ function BakayiseAppContent() {
             setEditingExpense(null);
             setQuickCategoryId(undefined);
           }}
-          onSave={(exp) => saveExpense(exp)}
-          onSaveBulk={(bulkExps) => batchSaveExpenses(bulkExps)}
+          onSave={(exp) => handleSaveExpenseWithSync(exp)}
+          onSaveBulk={(bulkExps) => handleBatchSaveExpensesWithSync(bulkExps)}
           categories={categories}
           accounts={accounts}
+          debts={debts}
           currentPeriodId={currentPeriod?.id || ''}
           initialExpense={editingExpense}
           defaultCategoryId={quickCategoryId}
@@ -1202,8 +1562,21 @@ function BakayiseAppContent() {
             setIsIncomeModalOpen(false);
             setEditingIncome(null);
           }}
-          onSave={(inc) => saveIncome(inc)}
+          onSave={(inc) => {
+            if (!activeWorkspaceId) throw new Error('Cannot save income: No workspace selected.');
+            saveIncome({ ...inc, householdId: activeWorkspaceId, workspaceId: activeWorkspaceId });
+          }}
+          onSaveBulk={async (incomes) => {
+            if (!activeWorkspaceId) throw new Error('Cannot save incomes: No workspace selected.');
+            const mapped = incomes.map((inc) => ({
+              ...inc,
+              householdId: activeWorkspaceId,
+              workspaceId: activeWorkspaceId,
+            }));
+            await saveIncomesBulk(mapped);
+          }}
           accounts={accounts}
+          accountBalances={accountLiveBalances}
           currentPeriodId={currentPeriod?.id || ''}
           initialIncome={editingIncome}
         />
@@ -1219,8 +1592,21 @@ function BakayiseAppContent() {
             setIsCategoryModalOpen(false);
             setEditingCategory(null);
           }}
-          onSave={(cat) => saveCategory(cat)}
+          onSave={(cat) => {
+            if (!activeWorkspaceId) throw new Error('Cannot save category: No workspace selected.');
+            saveCategory({ ...cat, householdId: activeWorkspaceId, workspaceId: activeWorkspaceId });
+          }}
+          onSaveBulk={async (categories) => {
+            if (!activeWorkspaceId) throw new Error('Cannot save categories: No workspace selected.');
+            const mapped = categories.map((cat) => ({
+              ...cat,
+              householdId: activeWorkspaceId,
+              workspaceId: activeWorkspaceId,
+            }));
+            await saveCategoriesBulk(mapped);
+          }}
           accounts={accounts}
+          accountBalances={accountLiveBalances}
           currentPeriodId={currentPeriod?.id || ''}
           initialCategory={editingCategory}
         />
@@ -1231,7 +1617,10 @@ function BakayiseAppContent() {
             setIsAccountModalOpen(false);
             setEditingAccount(null);
           }}
-          onSave={(acc) => saveAccount(acc)}
+          onSave={(acc) => {
+            if (!activeWorkspaceId) throw new Error('Cannot save account: No workspace selected.');
+            saveAccount({ ...acc, householdId: activeWorkspaceId, workspaceId: activeWorkspaceId });
+          }}
           initialAccount={editingAccount}
         />
 
@@ -1243,6 +1632,8 @@ function BakayiseAppContent() {
           existingPeriods={periods}
           currentCategories={categories}
           hasExistingCategories={categories.length > 0}
+          debts={debts}
+          accounts={accounts}
         />
 
         <EditPeriodModal
@@ -1336,9 +1727,14 @@ function BakayiseAppContent() {
             setIsDebtModalOpen(false);
             setEditingDebt(null);
           }}
-          onSave={(d) => saveDebt(d)}
+          onSave={(d) => {
+            if (!activeWorkspaceId) throw new Error('Cannot save debt: No workspace selected.');
+            saveDebt({ ...d, householdId: activeWorkspaceId, workspaceId: activeWorkspaceId });
+          }}
           initialDebt={editingDebt}
         />
+
+        <WorkspaceGatekeeperModal isOpen={isAuthorized && !activeWorkspaceId} />
 
         <PaydayCalendarModal
           isOpen={isCalendarModalOpen}

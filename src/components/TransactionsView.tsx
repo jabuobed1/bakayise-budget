@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { Expense, Income, FinancialAccount, BudgetCategory, BudgetPeriod } from '../types';
+import { Expense, Income, FinancialAccount, BudgetCategory, BudgetPeriod, Debt } from '../types';
 import { formatZAR, formatDateNice } from '../utils/southAfricaHolidays';
-import { Search, Filter, ArrowUpRight, ArrowDownLeft, Calendar, Tag, CreditCard, ExternalLink, Trash2, History, Layers } from 'lucide-react';
+import { Search, Filter, ArrowUpRight, ArrowDownLeft, Calendar, Tag, CreditCard, ExternalLink, Trash2, History, Layers, Target, ArrowRightLeft } from 'lucide-react';
 
 interface TransactionsViewProps {
   expenses: Expense[];
   incomes: Income[];
   accounts: FinancialAccount[];
   categories: BudgetCategory[];
+  debts?: Debt[];
   periods?: BudgetPeriod[];
   currentPeriodId?: string;
   onDeleteExpense: (id: string) => void;
@@ -19,18 +20,20 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   incomes,
   accounts,
   categories,
+  debts = [],
   periods = [],
   currentPeriodId,
   onDeleteExpense,
   onDeleteIncome,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense' | 'debt_payment' | 'transfer'>('all');
   const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'last_week'>('all');
   const [selectedCycleId, setSelectedCycleId] = useState<string>('all');
 
   const accountMap = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts]);
   const categoryMap = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
+  const debtMap = useMemo(() => new Map((debts || []).map(d => [d.id, d])), [debts]);
   const periodMap = useMemo(() => new Map(periods.map(p => [p.id, p])), [periods]);
 
   // Spending & Income metrics calculation
@@ -139,9 +142,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       }
       
       // 3. Type filter
-      if (filterType !== 'all' && tx.txType !== filterType) {
-        return false;
-      }
+      if (filterType === 'expense' && tx.txType !== 'expense') return false;
+      if (filterType === 'income' && tx.txType !== 'income') return false;
+      if (filterType === 'debt_payment' && !tx.linkedDebtId) return false;
+      if (filterType === 'transfer' && !tx.transferId && !tx.targetAccountId && tx.sourceTag !== 'Internal Transfer') return false;
 
       // 4. Time filter
       const txDateStr = (tx.date || tx.receivedDate || tx.createdAt || '').split('T')[0];
@@ -292,24 +296,38 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           </div>
 
           {/* Type Filter */}
-          <div className="flex bg-[#1C1C1E] border border-white/10 rounded-xl p-1">
+          <div className="flex bg-[#1C1C1E] border border-white/10 rounded-xl p-1 overflow-x-auto flex-wrap gap-1">
             <button
               onClick={() => setFilterType('all')}
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition ${filterType === 'all' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${filterType === 'all' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}
             >
               All
             </button>
             <button
               onClick={() => setFilterType('expense')}
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition ${filterType === 'expense' ? 'bg-red-500/20 text-red-400' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${filterType === 'expense' ? 'bg-red-500/20 text-red-400' : 'text-slate-500 hover:text-slate-300'}`}
             >
               Expenses
             </button>
             <button
               onClick={() => setFilterType('income')}
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition ${filterType === 'income' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${filterType === 'income' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}
             >
               Incomes
+            </button>
+            <button
+              onClick={() => setFilterType('debt_payment')}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center gap-1 cursor-pointer ${filterType === 'debt_payment' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              <Target className="w-3 h-3 text-amber-400" />
+              <span>Debt Payments</span>
+            </button>
+            <button
+              onClick={() => setFilterType('transfer')}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap flex items-center gap-1 cursor-pointer ${filterType === 'transfer' ? 'bg-sky-500/20 text-sky-300' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              <ArrowRightLeft className="w-3 h-3 text-sky-400" />
+              <span>Transfers</span>
             </button>
           </div>
         </div>
@@ -334,15 +352,33 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 const acc = tx.accountId ? accountMap.get(tx.accountId) : null;
                 const cat = tx.categoryId ? categoryMap.get(tx.categoryId) : null;
                 const period = tx.periodId ? periodMap.get(tx.periodId) : null;
+                const linkedDebt = tx.linkedDebtId ? debtMap.get(tx.linkedDebtId) : null;
                 const isExpense = tx.txType === 'expense';
+                const isTransfer = tx.transferId || tx.targetAccountId || tx.sourceTag === 'Internal Transfer';
                 const txDate = tx.date || tx.receivedDate || tx.createdAt;
 
                 return (
                   <tr key={tx.id} className="hover:bg-white/[0.02] transition-colors group">
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isExpense ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-                          {isExpense ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          linkedDebt
+                            ? 'bg-amber-500/10 text-amber-400'
+                            : isTransfer
+                            ? 'bg-sky-500/10 text-sky-400'
+                            : isExpense
+                            ? 'bg-red-500/10 text-red-400'
+                            : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {linkedDebt ? (
+                            <Target className="w-4 h-4" />
+                          ) : isTransfer ? (
+                            <ArrowRightLeft className="w-4 h-4" />
+                          ) : isExpense ? (
+                            <ArrowUpRight className="w-4 h-4" />
+                          ) : (
+                            <ArrowDownLeft className="w-4 h-4" />
+                          )}
                         </div>
                         <div>
                           <p className="text-sm font-bold text-white">{formatDateNice(txDate)}</p>
@@ -352,10 +388,24 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     </td>
                     <td className="py-4 px-6">
                       <div>
-                        <p className="text-sm font-bold text-slate-200">
-                          {tx.title || tx.merchant || tx.source || tx.sourceTag || (isExpense ? 'Expense' : 'Income')}
-                        </p>
-                        {tx.notes && <p className="text-[11px] text-slate-500 truncate max-w-[220px]">{tx.notes}</p>}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-bold text-slate-200">
+                            {tx.title || tx.merchant || tx.source || tx.sourceTag || (isExpense ? 'Expense' : 'Income')}
+                          </p>
+                          {linkedDebt && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-bold">
+                              <Target className="w-2.5 h-2.5" />
+                              <span>Debt: {linkedDebt.name}</span>
+                            </span>
+                          )}
+                          {isTransfer && !linkedDebt && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[10px] font-bold">
+                              <ArrowRightLeft className="w-2.5 h-2.5" />
+                              <span>Internal Transfer</span>
+                            </span>
+                          )}
+                        </div>
+                        {tx.notes && <p className="text-[11px] text-slate-500 truncate max-w-[220px] mt-0.5">{tx.notes}</p>}
                       </div>
                     </td>
                     <td className="py-4 px-6">
@@ -383,6 +433,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       <span className={`text-sm font-mono font-bold ${isExpense ? 'text-[#FF453A]' : 'text-[#30D158]'}`}>
                         {isExpense ? '-' : '+'}{formatZAR(tx.amount || 0)}
                       </span>
+                      {tx.accountBalanceAtTransactionTime !== undefined && (
+                        <p className="text-[10px] font-mono text-slate-400 mt-0.5">
+                          Bal: {formatZAR(tx.accountBalanceAtTransactionTime)}
+                        </p>
+                      )}
                     </td>
                     <td className="py-4 px-6 text-center">
                       <button

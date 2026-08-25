@@ -368,9 +368,16 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-3.5 shrink-0 pl-12 sm:pl-0">
-                    <span className="text-base font-bold text-white tracking-tight">
-                      {formatZAR(exp.amount)}
-                    </span>
+                    <div className="text-right">
+                      <span className="text-base font-bold text-white tracking-tight block">
+                        {formatZAR(exp.amount)}
+                      </span>
+                      {exp.accountBalanceAtTransactionTime !== undefined && (
+                        <span className="text-[10px] font-mono text-slate-400 block">
+                          Bal: {formatZAR(exp.accountBalanceAtTransactionTime)}
+                        </span>
+                      )}
+                    </div>
 
                     <div className="flex items-center gap-1">
                       <button

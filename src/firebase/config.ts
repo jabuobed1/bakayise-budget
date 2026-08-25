@@ -10,19 +10,31 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// CRITICAL: Must pass firebaseConfig.firestoreDatabaseId as third argument to initializeFirestore
-// experimentalAutoDetectLongPolling ensures seamless connection in all iframe and proxy environments
+const rawDbId = firebaseConfig.firestoreDatabaseId;
+// Ensure default Firestore database for bakayise-budget
+const isDefaultDb =
+  !rawDbId ||
+  rawDbId === '(default)' ||
+  rawDbId.trim() === '' ||
+  rawDbId.startsWith('ai-studio-');
+
+// Connect to default Firestore database or named database instance
 export const db =
   getApps().length > 1
-    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-    : initializeFirestore(
-        app,
-        {
-          experimentalAutoDetectLongPolling: true,
-          ignoreUndefinedProperties: true,
-        },
-        firebaseConfig.firestoreDatabaseId
-      );
+    ? (isDefaultDb ? getFirestore(app) : getFirestore(app, rawDbId))
+    : (isDefaultDb
+        ? initializeFirestore(app, {
+            experimentalAutoDetectLongPolling: true,
+            ignoreUndefinedProperties: true,
+          })
+        : initializeFirestore(
+            app,
+            {
+              experimentalAutoDetectLongPolling: true,
+              ignoreUndefinedProperties: true,
+            },
+            rawDbId
+          ));
 
 export const auth = getAuth(app);
 

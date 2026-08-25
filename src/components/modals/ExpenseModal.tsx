@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Expense, BudgetCategory, LoggedBy, FinancialAccount } from '../../types';
+import { Expense, BudgetCategory, LoggedBy, FinancialAccount, Debt } from '../../types';
 import { PAYMENT_METHODS } from '../../utils/budgetConstants';
 import { evaluateMathExpression, formatMathLivePreview, isMathExpression } from '../../utils/mathEvaluator';
+import { formatZAR } from '../../utils/southAfricaHolidays';
 import { FigmaIcon } from '../ui/FigmaIcon';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -24,6 +25,8 @@ import {
   Table,
   CheckSquare,
   Square,
+  Target,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { scanExpenseReceipt, ScannedExpenseResult } from '../../services/aiReceiptScanner';
 
@@ -37,6 +40,7 @@ interface ExpenseModalProps {
   initialExpense?: Expense | null;
   defaultCategoryId?: string;
   accounts?: FinancialAccount[];
+  debts?: Debt[];
   onOpenAtmDepositModal?: () => void;
 }
 
@@ -91,6 +95,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   initialExpense,
   defaultCategoryId,
   accounts = [],
+  debts = [],
   onOpenAtmDepositModal,
 }) => {
   const { member } = useAuth();
@@ -104,6 +109,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [accountId, setAccountId] = useState<string>('');
+  const [linkedSelection, setLinkedSelection] = useState<string>('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [loggedBy, setLoggedBy] = useState<LoggedBy>(defaultMember);
   const [paymentMethod, setPaymentMethod] = useState('Debit Card');
@@ -149,6 +155,13 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
         initialExpense.accountId ||
           (accounts.find((a) => a.isDefault)?.id || accounts[0]?.id || '')
       );
+      if (initialExpense.linkedDebtId) {
+        setLinkedSelection(`debt:${initialExpense.linkedDebtId}`);
+      } else if (initialExpense.targetAccountId) {
+        setLinkedSelection(`account:${initialExpense.targetAccountId}`);
+      } else {
+        setLinkedSelection('');
+      }
       setDate(initialExpense.date);
       setLoggedBy(initialExpense.loggedBy);
       setPaymentMethod(initialExpense.paymentMethod || 'Debit Card');
@@ -166,13 +179,14 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
         accounts[0]?.id ||
         '';
       setAccountId(defaultAcc);
+      setLinkedSelection('');
       setDate(new Date().toISOString().split('T')[0]);
       setLoggedBy(defaultMember);
       setPaymentMethod('Debit Card');
       setNotes('');
       setActiveTab('image'); // Default primary input tab
     }
-  }, [initialExpense, defaultCategoryId, categories, isOpen, accounts, defaultMember]);
+  }, [initialExpense, defaultCategoryId, categories, isOpen, accounts, debts, defaultMember]);
 
   if (!isOpen) return null;
 
@@ -182,6 +196,37 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     const cat = categories.find((c) => c.id === newCatId);
     if (cat?.defaultAccountId) {
       setAccountId(cat.defaultAccountId);
+    }
+  };
+
+  // Handle Linked Debt or Destination Account selection
+  const handleLinkedSelectionChange = (val: string) => {
+    setLinkedSelection(val);
+    if (val.startsWith('debt:')) {
+      const debtId = val.replace('debt:', '');
+      const debt = debts.find((d) => d.id === debtId);
+      if (debt) {
+        if (!title || title.trim() === '') {
+          setTitle(`Payment: ${debt.name}`);
+        }
+        // Auto-select debt category if available
+        const debtCat = categories.find(
+          (c) => c.group === 'debt_snowball' || (c.tag && c.tag.toLowerCase().includes('debt')) || c.name.toLowerCase().includes('debt')
+        );
+        if (debtCat) {
+          setCategoryId(debtCat.id);
+        }
+        setPaymentMethod('Electronic Transfer / EFT');
+      }
+    } else if (val.startsWith('account:')) {
+      const accId = val.replace('account:', '');
+      const targetAcc = accounts.find((a) => a.id === accId);
+      if (targetAcc) {
+        if (!title || title.trim() === '') {
+          setTitle(`Transfer to ${targetAcc.name}`);
+        }
+        setPaymentMethod('Electronic Transfer / EFT');
+      }
     }
   };
 
@@ -431,6 +476,18 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       return;
     }
 
+    let linkedDebtId: string | undefined = undefined;
+    let targetAccountId: string | undefined = undefined;
+    let transferType: 'standard' | 'debt_payment' | 'internal_transfer' = 'standard';
+
+    if (linkedSelection.startsWith('debt:')) {
+      linkedDebtId = linkedSelection.replace('debt:', '');
+      transferType = 'debt_payment';
+    } else if (linkedSelection.startsWith('account:')) {
+      targetAccountId = linkedSelection.replace('account:', '');
+      transferType = 'internal_transfer';
+    }
+
     const expenseData: Expense = {
       id: initialExpense?.id || `exp_${Date.now()}`,
       periodId: currentPeriodId,
@@ -442,6 +499,9 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       accountId: accountId.trim(),
       paymentMethod,
       notes: notes.trim() || undefined,
+      linkedDebtId,
+      targetAccountId,
+      transferType,
       createdAt: initialExpense?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1281,6 +1341,60 @@ Payment made at order placement R311.94`;
                   ))}
                 </select>
               </div>
+            </div>
+
+            {/* Link to Debt / Destination Account (Optional) */}
+            <div className="w-full max-w-full min-w-0 bg-[#242426] border border-white/[0.08] rounded-[16px] p-3.5 space-y-2">
+              <label className="block text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-white">
+                  <Target className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Link to Debt Payoff or Transfer Account (Optional)</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-normal">Auto-deducts balance</span>
+              </label>
+              <select
+                value={linkedSelection}
+                onChange={(e) => handleLinkedSelectionChange(e.target.value)}
+                className="w-full max-w-full min-w-0 box-border bg-[#1C1C1E] border border-white/10 text-white px-3.5 py-2.5 rounded-[12px] text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#30D158] cursor-pointer"
+              >
+                <option value="">None (Standard Envelope Expense)</option>
+                {debts.length > 0 && (
+                  <optgroup label="🎯 Debts & Snowball (Reduces Debt Balance)">
+                    {debts.map((d) => (
+                      <option key={`debt:${d.id}`} value={`debt:${d.id}`}>
+                        🎯 Debt: {d.name} (Owing {formatZAR(d.balance)})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {accounts.length > 0 && (
+                  <optgroup label="🔄 Destination Financial Accounts (Internal Transfer / Card Payoff)">
+                    {accounts
+                      .filter((a) => a.id !== accountId)
+                      .map((acc) => (
+                        <option key={`account:${acc.id}`} value={`account:${acc.id}`}>
+                          🔄 Transfer to: {acc.name} ({acc.institution || acc.type})
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
+              </select>
+              {linkedSelection.startsWith('debt:') && (
+                <div className="text-[11px] text-amber-300/90 flex items-center gap-1.5 mt-1 bg-amber-500/10 p-2 rounded-[10px] border border-amber-500/20">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                  <span>
+                    Saving this expense will automatically subtract {amount ? formatZAR(parseFloat(amount) || 0) : 'the payment'} from the debt balance.
+                  </span>
+                </div>
+              )}
+              {linkedSelection.startsWith('account:') && (
+                <div className="text-[11px] text-sky-300/90 flex items-center gap-1.5 mt-1 bg-sky-500/10 p-2 rounded-[10px] border border-sky-500/20">
+                  <ArrowRightLeft className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+                  <span>
+                    This transaction will be recorded as an internal transfer between your accounts.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Notes */}

@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Debt, DebtCategory } from '../types';
 import { formatZAR, formatZARCompact } from '../utils/southAfricaHolidays';
-import { evaluateMathExpression, formatMathLivePreview, isMathExpression } from '../utils/mathEvaluator';
 import { FigmaIcon, FigmaIconName } from './ui/FigmaIcon';
-import { Flame, Plus, Edit2, Trash2, CheckCircle2, ArrowRight, Zap, Target, Calculator } from 'lucide-react';
+import { Flame, Plus, Edit2, Trash2, CheckCircle2, ArrowRight, Zap, Target } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface DebtSnowballManagerProps {
@@ -11,7 +10,7 @@ interface DebtSnowballManagerProps {
   onOpenAddDebtModal: () => void;
   onOpenEditDebtModal: (debt: Debt) => void;
   onDeleteDebt: (debtId: string) => void;
-  onRecordPayment: (debtId: string, paymentAmount: number) => void;
+  onRecordPayment?: (debtId: string, paymentAmount: number) => void;
   onMarkPaidOff: (debtId: string) => void;
 }
 
@@ -29,11 +28,9 @@ export const DebtSnowballManager: React.FC<DebtSnowballManagerProps> = ({
   onOpenAddDebtModal,
   onOpenEditDebtModal,
   onDeleteDebt,
-  onRecordPayment,
   onMarkPaidOff,
 }) => {
   const [extraSnowball, setExtraSnowball] = useState<number>(1000);
-  const [customPaymentAmounts, setCustomPaymentAmounts] = useState<Record<string, string>>({});
 
   // Active debts sorted strictly by Balance Ascending (Dave Ramsey Snowball rule)
   const activeDebts = debts
@@ -45,13 +42,6 @@ export const DebtSnowballManager: React.FC<DebtSnowballManagerProps> = ({
   const totalOutstanding = activeDebts.reduce((sum, d) => sum + d.balance, 0);
   const totalMinPayment = activeDebts.reduce((sum, d) => sum + d.minimumPayment, 0);
   const totalMonthlyAttack = totalMinPayment + extraSnowball;
-
-  const handleCustomPay = (debtId: string) => {
-    const val = evaluateMathExpression(customPaymentAmounts[debtId]);
-    if (val === null || val <= 0) return;
-    onRecordPayment(debtId, val);
-    setCustomPaymentAmounts((prev) => ({ ...prev, [debtId]: '' }));
-  };
 
   return (
     <div className="space-y-6">
@@ -236,37 +226,6 @@ export const DebtSnowballManager: React.FC<DebtSnowballManagerProps> = ({
 
                     {/* Right: Payment Actions & Edit */}
                     <div className="flex items-center gap-2 flex-wrap lg:justify-end shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-white/[0.06]">
-                      <div className="relative flex items-center gap-1.5">
-                        <input
-                          type="text"
-                          inputMode="text"
-                          placeholder="R Amount (e.g. 150*3)"
-                          value={customPaymentAmounts[debt.id] || ''}
-                          onChange={(e) =>
-                            setCustomPaymentAmounts({
-                              ...customPaymentAmounts,
-                              [debt.id]: e.target.value,
-                            })
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleCustomPay(debt.id);
-                          }}
-                          className="w-32 bg-[#2C2C2E] border border-white/10 text-white text-xs px-2.5 py-1.5 rounded-[10px] focus:outline-none focus:ring-1 focus:ring-[#30D158]"
-                        />
-                        {isMathExpression(customPaymentAmounts[debt.id] || '') && (
-                          <div className="absolute left-0 top-full mt-1 z-30 bg-[#1C1C1E] border border-[#30D158]/50 px-2 py-0.5 rounded text-[10px] font-mono text-[#30D158] font-bold shadow-xl whitespace-nowrap flex items-center gap-1">
-                            <Calculator className="w-3 h-3 text-[#30D158]" />
-                            <span>= {formatMathLivePreview(customPaymentAmounts[debt.id])}</span>
-                          </div>
-                        )}
-                        <button
-                          onClick={() => handleCustomPay(debt.id)}
-                          className="px-2.5 py-1.5 bg-[#30D158] hover:bg-[#34C759] text-black text-xs font-bold rounded-[10px] transition active:scale-95 cursor-pointer whitespace-nowrap"
-                        >
-                          Pay
-                        </button>
-                      </div>
-
                       <button
                         onClick={() => {
                           onMarkPaidOff(debt.id);

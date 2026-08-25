@@ -38,6 +38,7 @@ interface ExcelBudgetViewProps {
   incomes: Income[];
   expenses: Expense[];
   accounts?: FinancialAccount[];
+  accountBalances?: Record<string, number>;
   periods?: BudgetPeriod[]; // Added to allow copying to other cycles
   currentPeriod?: BudgetPeriod;
   onOpenAddCategoryModal: () => void;
@@ -70,6 +71,7 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
   incomes,
   expenses,
   accounts = [],
+  accountBalances,
   periods = [],
   currentPeriod,
   onOpenAddCategoryModal,
@@ -150,6 +152,99 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     }
     return map;
   }, [accounts]);
+
+  const defaultAccountId = useMemo(
+    () => accounts.find((a) => a.isDefault)?.id || accounts[0]?.id || '',
+    [accounts]
+  );
+
+  // Dynamic budget capacity ledger per bank account
+  const accountCapacityMap = useMemo(() => {
+    const map: Record<
+      string,
+      {
+        account: FinancialAccount;
+        baseLiveBalance: number;
+        expectedIncomes: number;
+        totalIncomesInCycle: number;
+        totalCapacity: number;
+        totalBudgeted: number;
+        remaining: number;
+      }
+    > = {};
+
+    for (const acc of accounts) {
+      const isLiability =
+        acc.type === 'credit_card' ||
+        acc.type === 'loan' ||
+        acc.type === 'vehicle_loan' ||
+        acc.type === 'home_loan';
+
+      const baseLiveBalance =
+        accountBalances?.[acc.id] ?? (acc.currentBalance ?? acc.openingBalance ?? 0);
+
+      // Incomes assigned to this account in the current pay cycle
+      const cycleIncomes = incomes.filter(
+        (inc) => (inc.accountId || defaultAccountId) === acc.id
+      );
+      const expectedIncomes = cycleIncomes
+        .filter((inc) => inc.status === 'expected')
+        .reduce((sum, inc) => sum + (inc.amount || 0), 0);
+      const totalIncomesInCycle = cycleIncomes.reduce(
+        (sum, inc) => sum + (inc.amount || 0),
+        0
+      );
+
+      // Total cycle capacity available to budget from this account
+      const totalCapacity = isLiability
+        ? (acc.openingBalance || 0) + totalIncomesInCycle
+        : baseLiveBalance + expectedIncomes;
+
+      // Sum all budgeted amounts for categories assigned to this account
+      const totalBudgeted = categories
+        .filter((cat) => {
+          if (editingCatId === cat.id && editingCatField === 'accountId') {
+            return (editingCatValue || defaultAccountId) === acc.id;
+          }
+          return (cat.defaultAccountId || defaultAccountId) === acc.id;
+        })
+        .reduce((sum, cat) => {
+          if (editingCatId === cat.id && editingCatField === 'amount') {
+            const parsed = evaluateMathExpression(editingCatValue);
+            return sum + (parsed !== null && parsed >= 0 ? parsed : cat.allocatedAmount || 0);
+          }
+          return sum + (cat.allocatedAmount || 0);
+        }, 0);
+
+      const remaining = totalCapacity - totalBudgeted;
+
+      map[acc.id] = {
+        account: acc,
+        baseLiveBalance,
+        expectedIncomes,
+        totalIncomesInCycle,
+        totalCapacity,
+        totalBudgeted,
+        remaining,
+      };
+    }
+
+    return map;
+  }, [
+    accounts,
+    accountBalances,
+    incomes,
+    categories,
+    defaultAccountId,
+    editingCatId,
+    editingCatField,
+    editingCatValue,
+  ]);
+
+  const getAccountCapacity = (accId?: string) => {
+    const targetId = accId || defaultAccountId;
+    return accountCapacityMap[targetId] || null;
+  };
 
   // Compute spent amount per category
   const spentByCategoryId = useMemo(() => {
@@ -831,11 +926,14 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                                   <option value="" disabled>
                                     Select Account
                                   </option>
-                                  {accounts.map((acc) => (
-                                    <option key={acc.id} value={acc.id}>
-                                      {acc.name}
-                                    </option>
-                                  ))}
+                                  {accounts.map((acc) => {
+                                    const bal = accountBalances?.[acc.id] ?? (acc.currentBalance ?? acc.openingBalance ?? 0);
+                                    return (
+                                      <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
+                                        {acc.name} (Bal: {formatZARCompact(bal)})
+                                      </option>
+                                    );
+                                  })}
                                 </select>
                               </td>
 
@@ -894,6 +992,17 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  console.log('[DEBUG LOG][ExcelBudgetView] Status button clicked for income:', {
+                                    incomeId: inc.id,
+                                    incomeTitle: inc.title,
+                                    currentStatus: inc.status,
+                                    amount: inc.amount,
+                                    accountId: inc.accountId,
+                                    periodId: inc.periodId,
+                                    workspaceId: inc.workspaceId,
+                                    householdId: inc.householdId,
+                                    timestamp: new Date().toISOString(),
+                                  });
                                   onToggleIncomeStatus(inc);
                                 }}
                                 className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold transition cursor-pointer ${
@@ -981,11 +1090,14 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                                   <option value="" disabled>
                                     Select Account
                                   </option>
-                                  {accounts.map((acc) => (
-                                    <option key={acc.id} value={acc.id}>
-                                      {acc.name}
-                                    </option>
-                                  ))}
+                                  {accounts.map((acc) => {
+                                    const bal = accountBalances?.[acc.id] ?? (acc.currentBalance ?? acc.openingBalance ?? 0);
+                                    return (
+                                      <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
+                                        {acc.name} (Bal: {formatZARCompact(bal)})
+                                      </option>
+                                    );
+                                  })}
                                 </select>
                               </td>
                               <td className="py-2 px-2">
@@ -1353,57 +1465,98 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                             <option value="" disabled>
                               Select Account
                             </option>
-                            {accounts.map((acc) => (
-                              <option key={acc.id} value={acc.id}>
-                                {acc.name}
-                              </option>
-                            ))}
+                            {accounts.map((acc) => {
+                              const cap = accountCapacityMap[acc.id];
+                              const rem = cap ? cap.remaining : 0;
+                              return (
+                                <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
+                                  {acc.name} (Avail: {formatZARCompact(rem)})
+                                </option>
+                              );
+                            })}
                           </select>
                         </td>
 
-                        {/* [D] Amount Budgeted (Inline Editable with Math Calculator) */}
+                        {/* [D] Amount Budgeted (Inline Editable with Math Calculator & Real-Time Account Capacity Badge) */}
                         <td
-                          className="py-2.5 px-3 text-right font-mono font-bold text-white border-r border-white/[0.06] cursor-pointer hover:bg-white/[0.02]"
+                          className="py-2 px-3 text-right font-mono font-bold text-white border-r border-white/[0.06] cursor-pointer hover:bg-white/[0.02]"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!isEditingAmount) handleStartEditCategory(cat, 'amount');
                           }}
                           title="Click to edit budgeted amount (Supports +, -, *, /)"
                         >
-                          {isEditingAmount ? (
-                            <div className="relative flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                              <span className="text-slate-400 text-xs">R</span>
-                              <input
-                                type="text"
-                                inputMode="text"
-                                value={editingCatValue}
-                                onChange={(e) => setEditingCatValue(e.target.value)}
-                                onBlur={() => handleSaveCategoryField(cat)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleSaveCategoryField(cat);
-                                  if (e.key === 'Escape') {
-                                    setEditingCatId(null);
-                                    setEditingCatField(null);
-                                  }
-                                }}
-                                autoFocus
-                                className="w-24 bg-[#1C1C1E] border-2 border-[#30D158] text-white px-2 py-0.5 rounded-[6px] text-right font-mono font-bold text-xs focus:outline-none shadow-lg"
-                              />
-                              {isMathExpression(editingCatValue) && (
-                                <div className="absolute right-0 top-full mt-1 z-30 bg-[#1C1C1E] border border-[#30D158]/50 px-2 py-0.5 rounded text-[10px] font-mono text-[#30D158] font-bold shadow-xl whitespace-nowrap flex items-center gap-1">
-                                  <Calculator className="w-3 h-3 text-[#30D158]" />
-                                  <span>= {formatMathLivePreview(editingCatValue)}</span>
+                          {(() => {
+                            const targetCap = getAccountCapacity(cat.defaultAccountId);
+                            return isEditingAmount ? (
+                              <div className="relative flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
+                                {targetCap && (
+                                  <div className="flex items-center justify-end">
+                                    <span
+                                      className={`text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded border whitespace-nowrap shadow-sm ${
+                                        targetCap.remaining >= 0
+                                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                          : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                      }`}
+                                      title={`${targetCap.account.name}: ${formatZAR(targetCap.totalCapacity)} cycle funds − ${formatZAR(targetCap.totalBudgeted)} total budgeted = ${formatZAR(targetCap.remaining)} remaining`}
+                                    >
+                                      {targetCap.remaining >= 0
+                                        ? `Avail: ${formatZARCompact(targetCap.remaining)}`
+                                        : `Over: ${formatZARCompact(targetCap.remaining)}`}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="relative flex items-center justify-end gap-1">
+                                  <span className="text-slate-400 text-xs">R</span>
+                                  <input
+                                    type="text"
+                                    inputMode="text"
+                                    value={editingCatValue}
+                                    onChange={(e) => setEditingCatValue(e.target.value)}
+                                    onBlur={() => handleSaveCategoryField(cat)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleSaveCategoryField(cat);
+                                      if (e.key === 'Escape') {
+                                        setEditingCatId(null);
+                                        setEditingCatField(null);
+                                      }
+                                    }}
+                                    autoFocus
+                                    className="w-24 bg-[#1C1C1E] border-2 border-[#30D158] text-white px-2 py-0.5 rounded-[6px] text-right font-mono font-bold text-xs focus:outline-none shadow-lg"
+                                  />
+                                  {isMathExpression(editingCatValue) && (
+                                    <div className="absolute right-0 top-full mt-1 z-30 bg-[#1C1C1E] border border-[#30D158]/50 px-2 py-0.5 rounded text-[10px] font-mono text-[#30D158] font-bold shadow-xl whitespace-nowrap flex items-center gap-1">
+                                      <Calculator className="w-3 h-3 text-[#30D158]" />
+                                      <span>= {formatMathLivePreview(editingCatValue)}</span>
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-end gap-1.5 group/amt">
-                              <span className="group-hover/amt:underline decoration-dashed decoration-slate-600 underline-offset-4 transition">
-                                {formatZAR(allocated)}
-                              </span>
-                              <Edit2 className="w-3 h-3 text-slate-500 opacity-0 group-hover/amt:opacity-100 transition shrink-0" />
-                            </div>
-                          )}
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-end gap-0.5 group/amt">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <span className="group-hover/amt:underline decoration-dashed decoration-slate-600 underline-offset-4 transition">
+                                    {formatZAR(allocated)}
+                                  </span>
+                                  <Edit2 className="w-3 h-3 text-slate-500 opacity-0 group-hover/amt:opacity-100 transition shrink-0" />
+                                </div>
+                                {targetCap && (
+                                  <span
+                                    className={`text-[8.5px] font-mono font-medium px-1 py-0 rounded border whitespace-nowrap leading-tight transition ${
+                                      targetCap.remaining >= 0
+                                        ? 'bg-emerald-500/10 text-emerald-400/90 border-emerald-500/20'
+                                        : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                    }`}
+                                    title={`${targetCap.account.name}: ${formatZAR(targetCap.totalCapacity)} cycle funds − ${formatZAR(targetCap.totalBudgeted)} budgeted = ${formatZAR(targetCap.remaining)} remaining`}
+                                  >
+                                    {targetCap.remaining >= 0
+                                      ? `Avail: ${formatZARCompact(targetCap.remaining)}`
+                                      : `Over: ${formatZARCompact(targetCap.remaining)}`}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* [E] Actual Spent */}
@@ -1544,21 +1697,46 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                       <option value="" disabled>
                         Select Account
                       </option>
-                      {accounts.map((acc) => (
-                        <option key={acc.id} value={acc.id}>
-                          {acc.name}
-                        </option>
-                      ))}
+                      {accounts.map((acc) => {
+                        const cap = accountCapacityMap[acc.id];
+                        const rem = cap ? cap.remaining : 0;
+                        return (
+                          <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
+                            {acc.name} (Avail: {formatZARCompact(rem)})
+                          </option>
+                        );
+                      })}
                     </select>
                   </td>
                   <td className="py-2 px-3">
-                    <input
-                      type="text"
-                      placeholder="0.00"
-                      value={newRowAmount}
-                      onChange={(e) => setNewRowAmount(e.target.value)}
-                      className="w-full bg-[#1C1C1E] border border-white/20 text-white px-2 py-1 rounded-[6px] text-xs text-right font-mono focus:outline-none focus:ring-1 focus:ring-[#30D158]"
-                    />
+                    <div className="relative flex flex-col items-end gap-1">
+                      {(() => {
+                        const targetCap = getAccountCapacity(newRowAccountId);
+                        return (
+                          targetCap && (
+                            <span
+                              className={`text-[8.5px] font-mono font-semibold px-1 py-0.2 rounded border whitespace-nowrap ${
+                                targetCap.remaining >= 0
+                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                  : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                              }`}
+                              title={`${targetCap.account.name}: ${formatZAR(targetCap.totalCapacity)} cycle funds − ${formatZAR(targetCap.totalBudgeted)} budgeted = ${formatZAR(targetCap.remaining)} remaining`}
+                            >
+                              {targetCap.remaining >= 0
+                                ? `Avail: ${formatZARCompact(targetCap.remaining)}`
+                                : `Over: ${formatZARCompact(targetCap.remaining)}`}
+                            </span>
+                          )
+                        );
+                      })()}
+                      <input
+                        type="text"
+                        placeholder="0.00"
+                        value={newRowAmount}
+                        onChange={(e) => setNewRowAmount(e.target.value)}
+                        className="w-full bg-[#1C1C1E] border border-white/20 text-white px-2 py-1 rounded-[6px] text-xs text-right font-mono focus:outline-none focus:ring-1 focus:ring-[#30D158]"
+                      />
+                    </div>
                   </td>
                   <td colSpan={4} className="py-2 px-3 text-right">
                     <div className="flex items-center justify-end gap-2">
