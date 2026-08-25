@@ -124,6 +124,8 @@ export interface Income extends EditAuditInfo {
   title: string;
   amount: number;
   type: IncomeType;
+  incomeClassification?: 'external_income' | 'internal_transfer' | 'debt_payment_deposit';
+  isTransfer?: boolean;
   sourceTag?: string;
   accountId?: string; // Destination financial account
   receivedDate?: string;
@@ -132,6 +134,7 @@ export interface Income extends EditAuditInfo {
   notes?: string;
   transferId?: string; // Link related transfer entries
   linkedExpenseId?: string; // Link to corresponding expense
+  linkedDebtId?: string;
   debtPaymentType?: 'installment' | 'direct_deposit';
   principalReduction?: number;
   interestCharged?: number;

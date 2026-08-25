@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { FinancialAccount, BudgetPeriod } from '../../types';
 import { formatZAR } from '../../utils/southAfricaHolidays';
-import { ArrowRightLeft, X, ArrowRight, ShieldCheck, CheckCircle2, Wallet, CreditCard, Building2 } from 'lucide-react';
+import {
+  calculateBankCharge,
+  identifyBankFromText,
+  getCostOptimizationTip,
+  TransactionType,
+} from '../../utils/bankChargesEngine';
+import { ArrowRightLeft, X, ArrowRight, ShieldCheck, CheckCircle2, Wallet, CreditCard, Building2, Zap, Info } from 'lucide-react';
 
 interface AccountTransferModalProps {
   isOpen: boolean;
@@ -38,6 +44,7 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
   const [amount, setAmount] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [reference, setReference] = useState<string>('Internal Transfer');
+  const [transferSpeed, setTransferSpeed] = useState<'standard_eft' | 'immediate_rtc' | 'payshap'>('standard_eft');
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -45,6 +52,39 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
 
   const sourceAccount = accounts.find((a) => a.id === sourceAccountId);
   const destAccount = accounts.find((a) => a.id === destinationAccountId);
+
+  const parsedAmount = parseFloat(amount) || 0;
+
+  // Detect bank profiles & calculate charge
+  const sourceBank = identifyBankFromText(sourceAccount?.name);
+  const destBank = identifyBankFromText(destAccount?.name);
+  const isSameBank = sourceBank === destBank && sourceBank !== 'other';
+
+  const txType: TransactionType = isSameBank
+    ? 'internal_transfer_same_bank'
+    : transferSpeed === 'immediate_rtc'
+    ? 'immediate_payment_rtc'
+    : transferSpeed === 'payshap'
+    ? 'payshap'
+    : 'interbank_eft';
+
+  const chargeInfo = useMemo(() => {
+    return calculateBankCharge({
+      bankCode: sourceBank,
+      accountName: sourceAccount?.name,
+      transactionType: txType,
+      amount: parsedAmount,
+    });
+  }, [sourceBank, sourceAccount?.name, txType, parsedAmount]);
+
+  const costTip = useMemo(() => {
+    return getCostOptimizationTip({
+      sourceBank,
+      destBank,
+      amount: parsedAmount,
+      transactionType: txType,
+    });
+  }, [sourceBank, destBank, parsedAmount, txType]);
 
   const getBalance = (acc: FinancialAccount) => {
     return accountBalances?.[acc.id] ?? (acc.openingBalance || 0);
@@ -227,6 +267,81 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Transfer Speed / Clearance Method */}
+          {!isSameBank && (
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                Transfer Speed & Clearance
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTransferSpeed('standard_eft')}
+                  className={`p-2.5 rounded-[12px] border text-left transition cursor-pointer ${
+                    transferSpeed === 'standard_eft'
+                      ? 'bg-sky-500/15 border-sky-500 text-white'
+                      : 'bg-[#2C2C2E] border-white/10 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <p className="text-xs font-bold">Standard EFT</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Free / R1.00</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTransferSpeed('immediate_rtc')}
+                  className={`p-2.5 rounded-[12px] border text-left transition cursor-pointer ${
+                    transferSpeed === 'immediate_rtc'
+                      ? 'bg-sky-500/15 border-sky-500 text-white'
+                      : 'bg-[#2C2C2E] border-white/10 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-1">
+                    <Zap className="w-3 h-3 text-amber-400" />
+                    <p className="text-xs font-bold">Instant (RTC)</p>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-0.5">R3 – R10</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTransferSpeed('payshap')}
+                  className={`p-2.5 rounded-[12px] border text-left transition cursor-pointer ${
+                    transferSpeed === 'payshap'
+                      ? 'bg-sky-500/15 border-sky-500 text-white'
+                      : 'bg-[#2C2C2E] border-white/10 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <p className="text-xs font-bold">PayShap</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">R0.50 – R3</p>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Bank Charges Engine Breakdown */}
+          {sourceAccount && (
+            <div className="p-3 bg-[#2C2C2E]/90 border border-white/10 rounded-[14px] space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: chargeInfo.profile.brandColor }} />
+                  <span className="font-bold text-white">{chargeInfo.profile.displayName} Fee:</span>
+                  <span className="text-slate-400 text-[11px]">({chargeInfo.rule.description})</span>
+                </div>
+                <span className={`font-mono font-bold ${chargeInfo.fee === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {chargeInfo.fee === 0 ? 'R0.00 (FREE)' : formatZAR(chargeInfo.fee)}
+                </span>
+              </div>
+              {chargeInfo.rule.notes && (
+                <p className="text-[10px] text-slate-400">{chargeInfo.rule.notes}</p>
+              )}
+              {costTip && (
+                <div className="mt-1 pt-1.5 border-t border-white/[0.06] flex items-start gap-1.5 text-[10px] text-sky-300">
+                  <Info className="w-3 h-3 text-sky-400 shrink-0 mt-0.5" />
+                  <span>{costTip}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Date & Reference */}
           <div className="grid grid-cols-2 gap-3">

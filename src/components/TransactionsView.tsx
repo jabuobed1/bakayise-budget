@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Expense, Income, FinancialAccount, BudgetCategory, BudgetPeriod, Debt } from '../types';
 import { formatZAR, formatDateNice } from '../utils/southAfricaHolidays';
+import { isExternalIncome } from '../utils/budgetConstants';
 import { Search, Filter, ArrowUpRight, ArrowDownLeft, Calendar, Tag, CreditCard, ExternalLink, Trash2, History, Layers, Target, ArrowRightLeft } from 'lucide-react';
 
 interface TransactionsViewProps {
@@ -84,7 +85,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       }
     });
 
-    incomes.filter(i => i.status === 'received').forEach(inc => {
+    incomes.filter(i => i.status === 'received' && isExternalIncome(i)).forEach(inc => {
       const matchesCycle = selectedCycleId === 'all' || inc.periodId === selectedCycleId;
       if (matchesCycle) {
         totalSettledIncome += inc.amount || 0;
@@ -354,7 +355,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 const period = tx.periodId ? periodMap.get(tx.periodId) : null;
                 const linkedDebt = tx.linkedDebtId ? debtMap.get(tx.linkedDebtId) : null;
                 const isExpense = tx.txType === 'expense';
-                const isTransfer = tx.transferId || tx.targetAccountId || tx.sourceTag === 'Internal Transfer';
+                const isDebtPayoff =
+                  tx.incomeClassification === 'debt_payment_deposit' ||
+                  Boolean(tx.linkedDebtId) ||
+                  Boolean(tx.debtPaymentType) ||
+                  tx.sourceTag === 'Debt Payoff';
+                const isTransfer =
+                  tx.incomeClassification === 'internal_transfer' ||
+                  (!isDebtPayoff && (Boolean(tx.transferId) || Boolean(tx.targetAccountId) || tx.isTransfer || tx.sourceTag === 'Internal Transfer'));
                 const txDate = tx.date || tx.receivedDate || tx.createdAt;
 
                 return (
@@ -362,7 +370,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                          linkedDebt
+                          linkedDebt || isDebtPayoff
                             ? 'bg-amber-500/10 text-amber-400'
                             : isTransfer
                             ? 'bg-sky-500/10 text-sky-400'
@@ -370,7 +378,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                             ? 'bg-red-500/10 text-red-400'
                             : 'bg-emerald-500/10 text-emerald-400'
                         }`}>
-                          {linkedDebt ? (
+                          {linkedDebt || isDebtPayoff ? (
                             <Target className="w-4 h-4" />
                           ) : isTransfer ? (
                             <ArrowRightLeft className="w-4 h-4" />
@@ -392,13 +400,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                           <p className="text-sm font-bold text-slate-200">
                             {tx.title || tx.merchant || tx.source || tx.sourceTag || (isExpense ? 'Expense' : 'Income')}
                           </p>
-                          {linkedDebt && (
+                          {(linkedDebt || isDebtPayoff) && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-bold">
                               <Target className="w-2.5 h-2.5" />
-                              <span>Debt: {linkedDebt.name}</span>
+                              <span>{linkedDebt ? `Debt: ${linkedDebt.name}` : 'Debt Payment Deposit'}</span>
                             </span>
                           )}
-                          {isTransfer && !linkedDebt && (
+                          {isTransfer && !linkedDebt && !isDebtPayoff && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[10px] font-bold">
                               <ArrowRightLeft className="w-2.5 h-2.5" />
                               <span>{isExpense ? 'Transfer Out (Expense)' : 'Transfer In (Deposit)'}</span>

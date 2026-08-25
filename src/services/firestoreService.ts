@@ -1367,15 +1367,43 @@ export async function saveExpense(expense: Expense): Promise<void> {
         }
       }
 
+      // Check whether target account is a debt/liability account
+      let isDebtOrLiability = Boolean(expense.linkedDebtId);
+      if (!isDebtOrLiability && expense.targetAccountId) {
+        try {
+          const tAccSnap = await getDoc(doc(db, 'financial_accounts', expense.targetAccountId));
+          if (tAccSnap.exists()) {
+            const tData = tAccSnap.data() as FinancialAccount;
+            if (['home_loan', 'vehicle_loan', 'loan', 'credit_card'].includes(tData.type)) {
+              isDebtOrLiability = true;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const classification: 'external_income' | 'internal_transfer' | 'debt_payment_deposit' = isDebtOrLiability
+        ? 'debt_payment_deposit'
+        : 'internal_transfer';
+
+      const incomeTitle = isDebtOrLiability
+        ? `Debt Payment from ${sourceName}: ${expense.title}`
+        : `Transfer from ${sourceName}: ${expense.title}`;
+
+      const sourceTag = isDebtOrLiability ? 'Debt Payoff' : 'Internal Transfer';
+
       await setDoc(
         doc(db, 'incomes', pairedIncId),
         cleanFirestoreObject({
           id: pairedIncId,
           periodId: expense.periodId,
-          title: `Transfer from ${sourceName}: ${expense.title}`,
+          title: incomeTitle,
           amount: expense.amount,
           type: 'other',
-          sourceTag: 'Internal Transfer',
+          incomeClassification: classification,
+          isTransfer: true,
+          sourceTag,
           status: 'received',
           receivedDate: expense.date,
           accountId: expense.targetAccountId,

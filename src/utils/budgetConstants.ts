@@ -1,4 +1,4 @@
-import { CategoryGroup, DebtCategory, IncomeType, AccountType, FinancialAccount } from '../types';
+import { CategoryGroup, DebtCategory, IncomeType, AccountType, FinancialAccount, Income } from '../types';
 
 export interface DefaultCategoryTemplate {
   name: string;
@@ -383,3 +383,31 @@ export const DAVE_RAMSEY_STEPS = [
     badge: 'Abundance',
   },
 ];
+
+/**
+ * Checks if an income entry represents true external income (Salary, Rental, Bonus, Freelance)
+ * as opposed to an internal fund movement (Inter-bank transfer) or a liability payoff (Bond / Loan payment).
+ */
+export function isExternalIncome(inc: Income): boolean {
+  if (inc.incomeClassification === 'internal_transfer' || inc.incomeClassification === 'debt_payment_deposit') {
+    return false;
+  }
+  if (inc.incomeClassification === 'external_income') {
+    return true;
+  }
+  if (inc.isTransfer === true) {
+    return false;
+  }
+  // Backwards compatibility heuristics for legacy entries:
+  if (
+    Boolean(inc.transferId) ||
+    Boolean(inc.linkedExpenseId) ||
+    Boolean(inc.debtPaymentType) ||
+    (inc.sourceTag && (inc.sourceTag.toLowerCase().includes('internal transfer') || inc.sourceTag.toLowerCase().includes('transfer'))) ||
+    (inc.title && (inc.title.startsWith('Transfer from ') || inc.title.startsWith('Transfer to ')))
+  ) {
+    return false;
+  }
+  return true;
+}
+

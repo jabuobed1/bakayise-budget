@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { BudgetCategory, Expense, Income, CategoryGroup, FinancialAccount, AccountType, BudgetPeriod } from '../types';
-import { CATEGORY_GROUPS, COMMON_CATEGORY_TAGS, ACCOUNT_TYPES } from '../utils/budgetConstants';
+import { CATEGORY_GROUPS, COMMON_CATEGORY_TAGS, ACCOUNT_TYPES, isExternalIncome } from '../utils/budgetConstants';
 import { formatZAR, formatZARCompact, formatDateNice } from '../utils/southAfricaHolidays';
 import { evaluateMathExpression, formatMathLivePreview, isMathExpression } from '../utils/mathEvaluator';
 import { FigmaIcon, FigmaIconName } from './ui/FigmaIcon';
@@ -158,6 +158,11 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     [accounts]
   );
 
+  // Filter true external incomes (exclude inter-account transfers & debt payoff deposits)
+  const externalIncomes = useMemo(() => {
+    return incomes.filter(isExternalIncome);
+  }, [incomes]);
+
   // Dynamic budget capacity ledger per bank account
   const accountCapacityMap = useMemo(() => {
     const map: Record<
@@ -184,7 +189,7 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
           : acc.openingBalance || 0;
 
       // Incomes assigned to this account in the current pay cycle (both expected and received)
-      const cycleIncomes = incomes.filter(
+      const cycleIncomes = externalIncomes.filter(
         (inc) => (inc.accountId || defaultAccountId) === acc.id
       );
       const expectedIncomes = cycleIncomes
@@ -243,7 +248,7 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     return map;
   }, [
     accounts,
-    incomes,
+    externalIncomes,
     categories,
     defaultAccountId,
     editingCatId,
@@ -267,16 +272,16 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     return { map, countMap };
   }, [expenses]);
 
-  // Total Planned & Received Incomes
+  // Total Planned & Received Incomes (True external income only)
   const totalPlannedIncome = useMemo(() => {
-    return incomes.reduce((sum, inc) => sum + (inc.amount || 0), 0);
-  }, [incomes]);
+    return externalIncomes.reduce((sum, inc) => sum + (inc.amount || 0), 0);
+  }, [externalIncomes]);
 
   const totalReceivedIncome = useMemo(() => {
-    return incomes
+    return externalIncomes
       .filter((inc) => inc.status === 'received')
       .reduce((sum, inc) => sum + (inc.amount || 0), 0);
-  }, [incomes]);
+  }, [externalIncomes]);
 
   // Total Budgeted & Actual Expenses
   const totalBudgetedExpenses = useMemo(() => {
@@ -307,9 +312,9 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     });
   }, [categories, searchTerm, selectedAccountFilter]);
 
-  // Filtered Incomes
+  // Filtered Incomes (True external incomes only)
   const filteredIncomes = useMemo(() => {
-    return incomes.filter((inc) => {
+    return externalIncomes.filter((inc) => {
       const matchesSearch =
         searchTerm === '' ||
         inc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -322,7 +327,7 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
 
       return matchesSearch && matchesAccount;
     });
-  }, [incomes, searchTerm, selectedAccountFilter]);
+  }, [externalIncomes, searchTerm, selectedAccountFilter]);
 
   // Handle start inline edit of category fields
   const handleStartEditCategory = (cat: BudgetCategory, field: 'name' | 'tag' | 'amount' | 'accountId') => {

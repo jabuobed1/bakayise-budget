@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { FinancialAccount, Income, Expense, BudgetCategory, AccountType, BudgetPeriod } from '../types';
 import { ACCOUNT_TYPES, SOUTH_AFRICAN_INSTITUTIONS } from '../utils/budgetConstants';
 import { formatZAR, formatZARCompact, formatDateNice } from '../utils/southAfricaHolidays';
+import { SA_BANK_PROFILES, SABankCode, BankFeeRule } from '../utils/bankChargesEngine';
 import { FigmaIcon } from './ui/FigmaIcon';
 import {
   CreditCard,
@@ -33,6 +34,8 @@ import {
   Trophy,
   ArrowRightLeft,
   Landmark,
+  FileSpreadsheet,
+  Info,
 } from 'lucide-react';
 
 interface AccountsManagerProps {
@@ -67,6 +70,8 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [activeLedgerAccount, setActiveLedgerAccount] = useState<FinancialAccount | null>(null);
+  const [isBankTariffModalOpen, setIsBankTariffModalOpen] = useState<boolean>(false);
+  const [selectedTariffBank, setSelectedTariffBank] = useState<SABankCode>('standard_bank');
 
   // Category map for quick lookup
   const categoryMap = useMemo(() => {
@@ -367,6 +372,15 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
                 <span>ATM Cash Deposit</span>
               </button>
             )}
+
+            <button
+              onClick={() => setIsBankTariffModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-[12px] bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-semibold transition active:scale-95 cursor-pointer"
+              title="View SA Bank Fees & Tariffs (Standard Bank, Capitec, Go Time, Absa)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+              <span>Bank Charges Guide</span>
+            </button>
 
             <button
               onClick={onOpenAddExpenseModal}
@@ -1072,6 +1086,167 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {/* SA Bank Charges & Tariffs Guide Modal */}
+      {isBankTariffModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+          <div className="bg-[#1C1C1E] border border-white/10 rounded-t-[28px] sm:rounded-[26px] max-w-2xl w-full p-5 sm:p-6 shadow-2xl my-0 sm:my-8 text-white max-h-[90vh] overflow-y-auto">
+            
+            {/* Grabber */}
+            <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-3 sm:hidden" />
+
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-[14px] bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                    South African Bank Charges & Tariffs (2025/2026)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Transparent fee breakdown for your configured banks and accounts
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsBankTariffModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-[#2C2C2E] hover:bg-[#3A3A3C] text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Bank Selector Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto py-3 border-b border-white/[0.06] scrollbar-none">
+              {(['standard_bank', 'capitec', 'gotyme', 'absa', 'fnb', 'nedbank', 'discovery'] as SABankCode[]).map(
+                (code) => {
+                  const prof = SA_BANK_PROFILES[code];
+                  const isSelected = selectedTariffBank === code;
+                  return (
+                    <button
+                      key={code}
+                      onClick={() => setSelectedTariffBank(code)}
+                      className={`px-3 py-1.5 rounded-[12px] text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-2 ${
+                        isSelected
+                          ? 'bg-white text-black shadow-md'
+                          : 'bg-[#2C2C2E] text-slate-400 hover:text-white border border-white/5'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: prof.brandColor }} />
+                      <span>{prof.displayName}</span>
+                    </button>
+                  );
+                }
+              )}
+            </div>
+
+            {/* Active Bank Profile Details */}
+            {(() => {
+              const activeProf = SA_BANK_PROFILES[selectedTariffBank] || SA_BANK_PROFILES.standard_bank;
+              return (
+                <div className="mt-4 space-y-4">
+                  {/* Bank Header Card */}
+                  <div
+                    className="p-4 rounded-[18px] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    style={{ backgroundColor: `${activeProf.brandColor}15` }}
+                  >
+                    <div>
+                      <span
+                        className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md text-white inline-block mb-1"
+                        style={{ backgroundColor: activeProf.brandColor }}
+                      >
+                        {activeProf.displayName}
+                      </span>
+                      <h4 className="text-base font-bold text-white">{activeProf.tagline}</h4>
+                    </div>
+                  </div>
+
+                  {/* Popular Account Tiers */}
+                  {activeProf.popularTiers.length > 0 && (
+                    <div>
+                      <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+                        Account Tiers & Monthly Admin Fees
+                      </h5>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {activeProf.popularTiers.map((tier) => (
+                          <div
+                            key={tier.tierId}
+                            className="bg-[#2C2C2E]/80 border border-white/10 rounded-[14px] p-3 space-y-1"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-white">{tier.tierName}</span>
+                              <span className="text-xs font-mono font-bold text-amber-400">
+                                {tier.monthlyFee === 0 ? 'R0.00 / mo' : `${formatZAR(tier.monthlyFee)} / mo`}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                              {tier.description}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Transaction Fee Schedule */}
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+                      Transaction Fee Schedule
+                    </h5>
+                    <div className="bg-[#252528] border border-white/10 rounded-[16px] divide-y divide-white/[0.06] overflow-hidden text-xs">
+                      {(Object.entries(activeProf.feeRules) as [string, BankFeeRule | undefined][]).map(([txKey, rule]) => (
+                        <div key={txKey} className="p-3 flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-bold text-slate-200">{rule?.description}</p>
+                            {rule?.notes && (
+                              <p className="text-[11px] text-slate-400 mt-0.5">{rule.notes}</p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0 font-mono font-bold">
+                            {rule?.fixedFee !== undefined && rule.fixedFee === 0 ? (
+                              <span className="text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 text-[10px]">
+                                FREE (R0.00)
+                              </span>
+                            ) : rule?.fixedFee !== undefined ? (
+                              <span className="text-amber-400">{formatZAR(rule.fixedFee)}</span>
+                            ) : (
+                              <span className="text-slate-300 text-[11px]">Dynamic Fee</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Pro Tip */}
+                  <div className="p-3.5 bg-sky-500/10 border border-sky-500/20 rounded-[14px] flex items-start gap-2 text-xs text-sky-200">
+                    <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold block text-white">Smart Zero-Based Tip:</span>
+                      <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                        To eliminate bank charges, use Standard EFT for scheduled envelope transfers, draw cash at retail till points (Pick n Pay / Boxer) instead of SASWITCH ATMs, and keep daily funds in high-interest accounts like Go Time GoalSave or Capitec.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Footer */}
+            <div className="mt-5 pt-3 border-t border-white/[0.08] flex justify-end">
+              <button
+                onClick={() => setIsBankTariffModalOpen(false)}
+                className="px-5 py-2 rounded-[12px] bg-white hover:bg-slate-200 text-black font-bold text-xs transition cursor-pointer"
+              >
+                Close Guide
+              </button>
+            </div>
+
           </div>
         </div>
       )}

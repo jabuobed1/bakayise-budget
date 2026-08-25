@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Income } from '../types';
 import { formatZAR, formatDateNice } from '../utils/southAfricaHolidays';
+import { isExternalIncome } from '../utils/budgetConstants';
 import { FigmaIcon, FigmaIconName } from './ui/FigmaIcon';
 import { Plus, Edit2, Trash2, Tag, Check, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 
@@ -21,8 +22,10 @@ export const IncomeList: React.FC<IncomeListProps> = ({
 }) => {
   const [isCollapsed, setIsCollapsed] = React.useState(true);
 
-  const totalExpected = incomes.reduce((sum, i) => sum + i.amount, 0);
-  const totalReceived = incomes
+  const displayIncomes = useMemo(() => incomes.filter(isExternalIncome), [incomes]);
+
+  const totalExpected = displayIncomes.reduce((sum, i) => sum + i.amount, 0);
+  const totalReceived = displayIncomes
     .filter((i) => i.status === 'received')
     .reduce((sum, i) => sum + i.amount, 0);
 
@@ -82,13 +85,13 @@ export const IncomeList: React.FC<IncomeListProps> = ({
       {/* Incomes Grid */}
       {!isCollapsed && (
         <>
-          {incomes.length === 0 ? (
+          {displayIncomes.length === 0 ? (
             <div className="text-center py-8 text-slate-500 text-xs">
               No income streams logged yet. Tap "Add Income" to register your family salary.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
-              {incomes.map((inc) => {
+              {displayIncomes.map((inc) => {
                 const isReceived = inc.status === 'received';
                 const { icon, color } = getIncomeIconName(inc.type);
 

@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { FinancialAccount, BudgetPeriod } from '../../types';
 import { SOUTH_AFRICAN_INSTITUTIONS } from '../../utils/budgetConstants';
 import { formatZAR } from '../../utils/southAfricaHolidays';
-import { Landmark, Banknote, X, MapPin, Building2, Wallet, Plus, ArrowUpRight } from 'lucide-react';
+import {
+  calculateBankCharge,
+  identifyBankFromText,
+  getCostOptimizationTip,
+  TransactionType,
+} from '../../utils/bankChargesEngine';
+import { Landmark, Banknote, X, MapPin, Building2, Wallet, Plus, ArrowUpRight, Info } from 'lucide-react';
 
 interface AtmCashDepositModalProps {
   isOpen: boolean;
@@ -53,6 +59,7 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
 
   const [amount, setAmount] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [depositChannel, setDepositChannel] = useState<'bank_atm' | 'retail_till'>('bank_atm');
   const [atmLocation, setAtmLocation] = useState<string>('Capitec Deposit ATM');
   const [reference, setReference] = useState<string>('ATM Cash Deposit');
   const [notes, setNotes] = useState<string>('');
@@ -62,6 +69,27 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
 
   const destAccount = accounts.find((a) => a.id === destinationAccountId);
   const cashAccount = accounts.find((a) => a.id === cashAccountId);
+  const parsedAmount = parseFloat(amount) || 0;
+
+  const destBank = identifyBankFromText(destAccount?.name);
+  const txType: TransactionType = depositChannel === 'retail_till' ? 'retail_cash_deposit' : 'atm_deposit_own';
+
+  const chargeInfo = useMemo(() => {
+    return calculateBankCharge({
+      bankCode: destBank,
+      accountName: destAccount?.name,
+      transactionType: txType,
+      amount: parsedAmount,
+    });
+  }, [destBank, destAccount?.name, txType, parsedAmount]);
+
+  const costTip = useMemo(() => {
+    return getCostOptimizationTip({
+      sourceBank: destBank,
+      amount: parsedAmount,
+      transactionType: txType,
+    });
+  }, [destBank, parsedAmount, txType]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -217,6 +245,77 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
               />
             </div>
           </div>
+
+          {/* Deposit Channel (Bank ATM vs Retail Store Till) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+              Deposit Channel
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDepositChannel('bank_atm');
+                  setAtmLocation(`${destAccount?.name || 'Bank'} ATM`);
+                }}
+                className={`p-2.5 rounded-[12px] border text-left transition cursor-pointer ${
+                  depositChannel === 'bank_atm'
+                    ? 'bg-[#30D158]/15 border-[#30D158] text-white'
+                    : 'bg-[#2C2C2E] border-white/10 text-slate-400 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Landmark className="w-3.5 h-3.5 text-[#30D158]" />
+                  <p className="text-xs font-bold">Bank ATM</p>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-0.5">Cash Accepting ATM</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDepositChannel('retail_till');
+                  setAtmLocation('Pick n Pay / Boxer Till');
+                }}
+                className={`p-2.5 rounded-[12px] border text-left transition cursor-pointer ${
+                  depositChannel === 'retail_till'
+                    ? 'bg-[#30D158]/15 border-[#30D158] text-white'
+                    : 'bg-[#2C2C2E] border-white/10 text-slate-400 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-amber-400" />
+                  <p className="text-xs font-bold">Store Till Counter</p>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-0.5">Pick n Pay / Boxer / Checkers</p>
+              </button>
+            </div>
+          </div>
+
+          {/* Bank Charges Engine Breakdown */}
+          {destAccount && parsedAmount > 0 && (
+            <div className="p-3 bg-[#2C2C2E]/90 border border-white/10 rounded-[14px] space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: chargeInfo.profile.brandColor }} />
+                  <span className="font-bold text-white">{chargeInfo.profile.displayName} Fee:</span>
+                  <span className="text-slate-400 text-[11px]">({chargeInfo.rule.description})</span>
+                </div>
+                <span className={`font-mono font-bold ${chargeInfo.fee === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {chargeInfo.fee === 0 ? 'R0.00 (FREE)' : formatZAR(chargeInfo.fee)}
+                </span>
+              </div>
+              {chargeInfo.rule.notes && (
+                <p className="text-[10px] text-slate-400">{chargeInfo.rule.notes}</p>
+              )}
+              {costTip && (
+                <div className="mt-1 pt-1.5 border-t border-white/[0.06] flex items-start gap-1.5 text-[10px] text-sky-300">
+                  <Info className="w-3 h-3 text-sky-400 shrink-0 mt-0.5" />
+                  <span>{costTip}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Date & ATM Location */}
           <div className="grid grid-cols-2 gap-3">
