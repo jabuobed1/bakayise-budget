@@ -146,29 +146,37 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
       }
     }
 
-    // Calculate final live balances
+    // Calculate authoritative live balances
     for (const acc of accounts) {
       const item = stats[acc.id];
       if (item) {
-        if (acc.type === 'credit_card') {
-          // For credit cards: base owed + card purchases (outflows) - payments made (inflows)
-          const baseOwed = acc.balanceOwed !== undefined ? acc.balanceOwed : acc.openingBalance || 0;
-          const liveOwed = Math.max(0, baseOwed + item.outflowsActual - item.inflowsReceived);
-          item.currentOwedBalance = liveOwed;
-          item.currentBalance = liveOwed;
+        const isLiability =
+          acc.type === 'credit_card' ||
+          acc.type === 'loan' ||
+          acc.type === 'vehicle_loan' ||
+          acc.type === 'home_loan';
+
+        if (isLiability) {
+          // acc.currentBalance or acc.balanceOwed is updated directly by firestoreService with full debt amortization (principal/interest/fee rules)
+          const liveOwed =
+            acc.currentBalance !== undefined
+              ? acc.currentBalance
+              : acc.balanceOwed !== undefined
+              ? acc.balanceOwed
+              : acc.openingBalance || 0;
+
+          item.currentOwedBalance = Math.max(0, liveOwed);
+          item.currentBalance = item.currentOwedBalance;
           const limit = acc.creditLimit || (liveOwed > 0 ? liveOwed * 1.5 : 25000);
           item.availableCredit = Math.max(0, limit - liveOwed);
-          item.projectedBalance = Math.max(0, baseOwed + item.outflowsPlanned - item.inflowsPlanned);
-        } else if (acc.type === 'loan' || acc.type === 'vehicle_loan' || acc.type === 'home_loan') {
-          // For debts / bonds: opening balance + outflows - repayments (inflows)
-          const baseOwed = acc.balanceOwed !== undefined ? acc.balanceOwed : acc.openingBalance || 0;
-          item.currentOwedBalance = Math.max(0, baseOwed + item.outflowsActual - item.inflowsReceived);
-          item.currentBalance = item.currentOwedBalance;
-          item.projectedBalance = Math.max(0, baseOwed + item.outflowsPlanned - item.inflowsPlanned);
+          item.projectedBalance = Math.max(0, liveOwed + item.outflowsPlanned - item.inflowsPlanned);
         } else {
-          // For positive assets: opening + inflows - outflows
-          item.currentBalance = (acc.openingBalance || 0) + item.inflowsReceived - item.outflowsActual;
-          item.projectedBalance = (acc.openingBalance || 0) + item.inflowsPlanned - item.outflowsPlanned;
+          // For positive/liquid assets: use authoritative currentBalance from Firestore if present, else openingBalance
+          const authoritativeBalance =
+            acc.currentBalance !== undefined ? acc.currentBalance : acc.openingBalance || 0;
+
+          item.currentBalance = authoritativeBalance;
+          item.projectedBalance = authoritativeBalance + item.inflowsPlanned - item.outflowsPlanned;
         }
       }
     }

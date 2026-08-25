@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Debt, DebtCategory } from '../../types';
+import { Debt, DebtCategory, FinancialAccount } from '../../types';
 import { DEBT_CATEGORIES } from '../../utils/budgetConstants';
 import { evaluateMathExpression, formatMathLivePreview, isMathExpression } from '../../utils/mathEvaluator';
 import { FigmaIcon } from '../ui/FigmaIcon';
-import { X, Calculator } from 'lucide-react';
+import { X, Calculator, Landmark } from 'lucide-react';
 
 interface DebtModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (debt: Debt) => void;
   initialDebt?: Debt | null;
+  accounts?: FinancialAccount[];
 }
 
 export const DebtModal: React.FC<DebtModalProps> = ({
@@ -17,42 +18,85 @@ export const DebtModal: React.FC<DebtModalProps> = ({
   onClose,
   onSave,
   initialDebt,
+  accounts = [],
 }) => {
   const [name, setName] = useState('');
   const [lender, setLender] = useState('');
   const [category, setCategory] = useState<DebtCategory>('store_card');
+  const [linkedAccountId, setLinkedAccountId] = useState('');
   const [balance, setBalance] = useState('');
   const [minimumPayment, setMinimumPayment] = useState('');
   const [interestRate, setInterestRate] = useState('');
+  const [monthlyFee, setMonthlyFee] = useState('');
   const [notes, setNotes] = useState('');
+
+  // Liability accounts available for linking
+  const liabilityAccounts = accounts.filter((a) =>
+    ['credit_card', 'loan', 'vehicle_loan', 'home_loan'].includes(a.type)
+  );
 
   useEffect(() => {
     if (initialDebt) {
       setName(initialDebt.name);
       setLender(initialDebt.lender || '');
       setCategory(initialDebt.category);
+      setLinkedAccountId(initialDebt.linkedAccountId || '');
       setBalance(initialDebt.balance.toString());
       setMinimumPayment(initialDebt.minimumPayment.toString());
       setInterestRate(initialDebt.interestRate.toString());
+      setMonthlyFee(initialDebt.monthlyFee !== undefined ? initialDebt.monthlyFee.toString() : '');
       setNotes(initialDebt.notes || '');
     } else {
       setName('');
       setLender('');
       setCategory('store_card');
+      setLinkedAccountId('');
       setBalance('');
       setMinimumPayment('');
       setInterestRate('21.0');
+      setMonthlyFee('0');
       setNotes('');
     }
   }, [initialDebt, isOpen]);
 
   if (!isOpen) return null;
 
+  // When user selects a linked financial account, auto-fill relevant defaults
+  const handleAccountLinkChange = (accId: string) => {
+    setLinkedAccountId(accId);
+    if (accId) {
+      const acc = accounts.find((a) => a.id === accId);
+      if (acc) {
+        if (!name || name.trim() === '') setName(acc.name);
+        if (!lender && acc.institution) setLender(acc.institution);
+        if (acc.interestRate !== undefined && !interestRate) {
+          setInterestRate(acc.interestRate.toString());
+        }
+        if (acc.monthlyFee !== undefined && !monthlyFee) {
+          setMonthlyFee(acc.monthlyFee.toString());
+        }
+        if (acc.minimumPayment !== undefined && !minimumPayment) {
+          setMinimumPayment(acc.minimumPayment.toString());
+        }
+        const accBal =
+          acc.currentBalance !== undefined
+            ? acc.currentBalance
+            : acc.balanceOwed !== undefined
+            ? acc.balanceOwed
+            : acc.openingBalance || 0;
+        if ((!balance || balance === '0') && accBal > 0) {
+          setBalance(accBal.toString());
+        }
+      }
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const numBalance = evaluateMathExpression(balance);
     const numMin = evaluateMathExpression(minimumPayment);
     const numRate = parseFloat(interestRate) || 0;
+    const numFee = evaluateMathExpression(monthlyFee) || 0;
 
     if (!name.trim() || numBalance === null || numBalance < 0 || numMin === null || numMin < 0) {
       return;
@@ -63,10 +107,12 @@ export const DebtModal: React.FC<DebtModalProps> = ({
       name: name.trim(),
       lender: lender.trim() || undefined,
       category,
+      linkedAccountId: linkedAccountId.trim() || undefined,
       balance: numBalance,
       originalBalance: initialDebt?.originalBalance || numBalance,
       minimumPayment: numMin,
       interestRate: numRate,
+      monthlyFee: numFee > 0 ? numFee : undefined,
       status: numBalance === 0 ? 'paid_off' : (initialDebt?.status || 'active'),
       notes: notes.trim() || undefined,
       createdAt: initialDebt?.createdAt || new Date().toISOString(),
@@ -127,6 +173,31 @@ export const DebtModal: React.FC<DebtModalProps> = ({
               ))}
             </select>
           </div>
+
+          {/* Optional: Link to Registered Financial Account */}
+          {liabilityAccounts.length > 0 && (
+            <div className="bg-[#242426] border border-white/[0.08] rounded-[14px] p-3 space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-white">
+                  <Landmark className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Link to Financial Account (Optional)</span>
+                </span>
+                <span className="text-[10px] text-emerald-400 font-normal">Auto-sync balance</span>
+              </label>
+              <select
+                value={linkedAccountId}
+                onChange={(e) => handleAccountLinkChange(e.target.value)}
+                className="w-full bg-[#1C1C1E] border border-white/10 text-white px-3 py-2 rounded-[10px] text-xs focus:outline-none focus:ring-2 focus:ring-[#FF453A] cursor-pointer"
+              >
+                <option value="">None (Manual standalone debt)</option>
+                {liabilityAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    💳 {acc.name} ({acc.institution || acc.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Name */}
           <div>
@@ -196,11 +267,11 @@ export const DebtModal: React.FC<DebtModalProps> = ({
             </div>
           </div>
 
-          {/* Minimum Payment & Interest Rate */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Minimum Payment & Interest Rate & Monthly Fee */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Minimum Monthly Due *
+                Minimum Due *
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold pointer-events-none">
@@ -245,6 +316,25 @@ export const DebtModal: React.FC<DebtModalProps> = ({
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">
                   %
                 </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Monthly Admin Fee
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold pointer-events-none">
+                  R
+                </span>
+                <input
+                  type="text"
+                  inputMode="text"
+                  placeholder="0.00"
+                  value={monthlyFee}
+                  onChange={(e) => setMonthlyFee(e.target.value)}
+                  className="w-full bg-[#2C2C2E] border border-white/10 text-white pl-8 pr-3 py-2 rounded-[14px] text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#FF453A]"
+                />
               </div>
             </div>
           </div>

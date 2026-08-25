@@ -3,6 +3,7 @@ import { Expense, BudgetCategory, LoggedBy, FinancialAccount, Debt } from '../..
 import { PAYMENT_METHODS } from '../../utils/budgetConstants';
 import { evaluateMathExpression, formatMathLivePreview, isMathExpression } from '../../utils/mathEvaluator';
 import { formatZAR } from '../../utils/southAfricaHolidays';
+import { calculateDebtReduction } from '../../utils/debtCalculations';
 import { FigmaIcon } from '../ui/FigmaIcon';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -114,6 +115,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const [loggedBy, setLoggedBy] = useState<LoggedBy>(defaultMember);
   const [paymentMethod, setPaymentMethod] = useState('Debit Card');
   const [notes, setNotes] = useState('');
+  const [debtPaymentType, setDebtPaymentType] = useState<'installment' | 'direct_deposit'>('installment');
   const [errorMessage, setErrorMessage] = useState('');
 
   // AI & Scanning State
@@ -162,6 +164,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       } else {
         setLinkedSelection('');
       }
+      setDebtPaymentType(initialExpense.debtPaymentType || 'installment');
       setDate(initialExpense.date);
       setLoggedBy(initialExpense.loggedBy);
       setPaymentMethod(initialExpense.paymentMethod || 'Debit Card');
@@ -180,6 +183,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
         '';
       setAccountId(defaultAcc);
       setLinkedSelection('');
+      setDebtPaymentType('installment');
       setDate(new Date().toISOString().split('T')[0]);
       setLoggedBy(defaultMember);
       setPaymentMethod('Debit Card');
@@ -502,6 +506,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       linkedDebtId,
       targetAccountId,
       transferType,
+      debtPaymentType: (linkedDebtId || (targetAccountId && ['credit_card', 'home_loan', 'vehicle_loan', 'loan'].includes(accounts.find(a => a.id === targetAccountId)?.type || ''))) ? debtPaymentType : undefined,
       createdAt: initialExpense?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1267,11 +1272,13 @@ Payment made at order placement R311.94`;
                   <option value="" disabled>
                     Select Paid From Account *
                   </option>
-                  {accounts.map((acc) => (
-                    <option key={acc.id} value={acc.id}>
-                      {acc.name} ({acc.institution || acc.type})
-                    </option>
-                  ))}
+                  {accounts
+                    .filter((acc) => !['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type))
+                    .map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.name} ({acc.institution || acc.type})
+                      </option>
+                    ))}
                 </select>
               )}
             </div>
@@ -1358,22 +1365,42 @@ Payment made at order placement R311.94`;
                 className="w-full max-w-full min-w-0 box-border bg-[#1C1C1E] border border-white/10 text-white px-3.5 py-2.5 rounded-[12px] text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#30D158] cursor-pointer"
               >
                 <option value="">None (Standard Envelope Expense)</option>
-                {debts.length > 0 && (
-                  <optgroup label="🎯 Debts & Snowball (Reduces Debt Balance)">
-                    {debts.map((d) => (
-                      <option key={`debt:${d.id}`} value={`debt:${d.id}`}>
-                        🎯 Debt: {d.name} (Owing {formatZAR(d.balance)})
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
+                {/* 1. Destination Financial Accounts (Internal Transfers, Credit Card & Loan Payoffs) */}
                 {accounts.length > 0 && (
-                  <optgroup label="🔄 Destination Financial Accounts (Internal Transfer / Card Payoff)">
+                  <optgroup label="💳 Financial Accounts (Transfers, Card & Loan Payoffs)">
                     {accounts
                       .filter((a) => a.id !== accountId)
                       .map((acc) => (
                         <option key={`account:${acc.id}`} value={`account:${acc.id}`}>
-                          🔄 Transfer to: {acc.name} ({acc.institution || acc.type})
+                          {['credit_card', 'home_loan', 'vehicle_loan', 'loan'].includes(acc.type) ? '🎯 Payoff' : '🔄 Transfer to'}: {acc.name} ({acc.institution || acc.type})
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
+                {/* 2. Unlinked Debts & Snowball (Debts not already associated with a Financial Account) */}
+                {debts.filter(
+                  (d) =>
+                    !d.linkedAccountId &&
+                    !accounts.some(
+                      (a) =>
+                        a.id === d.id ||
+                        a.name.trim().toLowerCase() === d.name.trim().toLowerCase()
+                    )
+                ).length > 0 && (
+                  <optgroup label="🎯 Standalone Debts & Snowball (Manual / Personal Debts)">
+                    {debts
+                      .filter(
+                        (d) =>
+                          !d.linkedAccountId &&
+                          !accounts.some(
+                            (a) =>
+                              a.id === d.id ||
+                              a.name.trim().toLowerCase() === d.name.trim().toLowerCase()
+                          )
+                      )
+                      .map((d) => (
+                        <option key={`debt:${d.id}`} value={`debt:${d.id}`}>
+                          🎯 Debt: {d.name} (Owing {formatZAR(d.balance)})
                         </option>
                       ))}
                   </optgroup>
@@ -1393,6 +1420,124 @@ Payment made at order placement R311.94`;
                   <span>
                     This transaction will be recorded as an internal transfer between your accounts.
                   </span>
+                </div>
+              )}
+              {/* If Linked to a Debt or Liability Account: Render Payment Method Type (Monthly Installment vs Direct Deposit) and Math Preview */}
+              {(linkedSelection.startsWith('debt:') ||
+                (linkedSelection.startsWith('account:') &&
+                  ['credit_card', 'home_loan', 'vehicle_loan', 'loan'].includes(
+                    accounts.find((a) => a.id === linkedSelection.replace('account:', ''))?.type || ''
+                  ))) && (
+                <div className="mt-2.5 pt-2.5 border-t border-white/10 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-white flex items-center gap-1.5">
+                      <span>Payment Calculation Rule:</span>
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDebtPaymentType('installment')}
+                      className={`py-2 px-2.5 rounded-[10px] text-xs font-semibold border transition text-left cursor-pointer ${
+                        debtPaymentType === 'installment'
+                          ? 'bg-[#30D158]/20 text-[#30D158] border-[#30D158]/60 shadow-sm'
+                          : 'bg-[#1C1C1E] border-white/10 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <div className="font-bold flex items-center gap-1">
+                        <span>📅 Monthly Installment</span>
+                      </div>
+                      <div className="text-[10px] opacity-80 mt-0.5">
+                        Applies monthly interest & admin fee amortization
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDebtPaymentType('direct_deposit')}
+                      className={`py-2 px-2.5 rounded-[10px] text-xs font-semibold border transition text-left cursor-pointer ${
+                        debtPaymentType === 'direct_deposit'
+                          ? 'bg-[#30D158]/20 text-[#30D158] border-[#30D158]/60 shadow-sm'
+                          : 'bg-[#1C1C1E] border-white/10 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <div className="font-bold flex items-center gap-1">
+                        <span>⚡ Direct Capital Deposit</span>
+                      </div>
+                      <div className="text-[10px] opacity-80 mt-0.5">
+                        100% direct principal reduction (no fees/interest deducted)
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Dynamic Math Calculation Live Preview */}
+                  {(() => {
+                    const numAmt = evaluateMathExpression(amount) || 0;
+                    if (numAmt <= 0) return null;
+
+                    let curBal = 0;
+                    let rate = 0;
+                    let fee = 0;
+                    let accType: string | undefined;
+                    let debtCat: string | undefined;
+
+                    if (linkedSelection.startsWith('debt:')) {
+                      const d = debts.find((item) => item.id === linkedSelection.replace('debt:', ''));
+                      if (d) {
+                        curBal = d.balance || 0;
+                        rate = d.interestRate || 0;
+                        fee = d.monthlyFee || 0;
+                        debtCat = d.category;
+                      }
+                    } else if (linkedSelection.startsWith('account:')) {
+                      const a = accounts.find((item) => item.id === linkedSelection.replace('account:', ''));
+                      if (a) {
+                        curBal = a.currentBalance !== undefined ? a.currentBalance : a.openingBalance || 0;
+                        rate = a.interestRate || 0;
+                        fee = a.monthlyFee || 0;
+                        accType = a.type;
+                      }
+                    }
+
+                    const calc = calculateDebtReduction({
+                      currentBalance: curBal,
+                      paymentAmount: numAmt,
+                      paymentType: debtPaymentType,
+                      accountType: accType,
+                      annualInterestRate: rate,
+                      monthlyFee: fee,
+                      debtCategory: debtCat,
+                    });
+
+                    return (
+                      <div className="mt-2 p-2.5 rounded-[10px] bg-black/40 border border-white/10 text-[11px] space-y-1">
+                        <div className="font-semibold text-emerald-400 flex items-center justify-between">
+                          <span>Calculation Preview ({debtPaymentType === 'installment' ? 'Contractual Rule' : 'Direct Deposit'}):</span>
+                          <span className="font-mono text-white font-bold">{formatZAR(calc.paidAmount)}</span>
+                        </div>
+                        {debtPaymentType === 'installment' && (
+                          <div className="grid grid-cols-3 gap-1 pt-1 text-[10px] text-slate-300 border-t border-white/[0.06]">
+                            <div>
+                              <span className="text-slate-400 block">Interest:</span>
+                              <span className="font-semibold text-red-400">{formatZAR(calc.interestCharged)}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block">Service Fee:</span>
+                              <span className="font-semibold text-amber-400">{formatZAR(calc.feesCharged)}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block">Principal Off:</span>
+                              <span className="font-semibold text-emerald-400">{formatZAR(calc.principalReduction)}</span>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between pt-1 border-t border-white/[0.06] text-[10px] text-slate-300">
+                          <span>Balance: {formatZAR(calc.previousBalance)} &rarr;</span>
+                          <span className="font-bold text-white font-mono">{formatZAR(calc.newBalance)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

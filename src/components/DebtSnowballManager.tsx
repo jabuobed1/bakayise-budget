@@ -212,6 +212,7 @@ export const DebtSnowballManager: React.FC<DebtSnowballManagerProps> = ({
                           {debt.lender && <span>Lender: {debt.lender}</span>}
                           <span>Min: <strong>{formatZAR(debt.minimumPayment)}/mo</strong></span>
                           {debt.interestRate ? <span>Interest: {debt.interestRate}%</span> : null}
+                          {debt.monthlyFee ? <span>Admin Fee: {formatZAR(debt.monthlyFee)}/mo</span> : null}
                         </div>
                       </div>
                     </div>

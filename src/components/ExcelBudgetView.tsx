@@ -174,16 +174,16 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     > = {};
 
     for (const acc of accounts) {
-      const isLiability =
-        acc.type === 'credit_card' ||
-        acc.type === 'loan' ||
-        acc.type === 'vehicle_loan' ||
-        acc.type === 'home_loan';
+      const isCreditCard = acc.type === 'credit_card';
+      const isFixedLiability =
+        acc.type === 'loan' || acc.type === 'vehicle_loan' || acc.type === 'home_loan' || acc.type === 'store_card';
 
       const baseLiveBalance =
-        accountBalances?.[acc.id] ?? (acc.currentBalance ?? acc.openingBalance ?? 0);
+        acc.currentBalance !== undefined
+          ? acc.currentBalance
+          : acc.openingBalance || 0;
 
-      // Incomes assigned to this account in the current pay cycle
+      // Incomes assigned to this account in the current pay cycle (both expected and received)
       const cycleIncomes = incomes.filter(
         (inc) => (inc.accountId || defaultAccountId) === acc.id
       );
@@ -195,10 +195,21 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
         0
       );
 
-      // Total cycle capacity available to budget from this account
-      const totalCapacity = isLiability
-        ? (acc.openingBalance || 0) + totalIncomesInCycle
-        : baseLiveBalance + expectedIncomes;
+      // Single-source budget capacity rule:
+      // 1. Credit Card: Available spending limit (Credit Limit - Owed)
+      // 2. Fixed Loans: Disallowed from spending capacity (0)
+      // 3. Regular Bank & Tax Free Accounts: Total planned incomes assigned to this account for the budget cycle
+      let totalCapacity = 0;
+      if (isCreditCard) {
+        const limit = acc.creditLimit || 0;
+        const owed = acc.currentBalance ?? acc.balanceOwed ?? 0;
+        totalCapacity = Math.max(0, limit - owed);
+      } else if (isFixedLiability) {
+        totalCapacity = 0;
+      } else {
+        // Standard bank / cash / tax-free accounts: total incomes in this cycle
+        totalCapacity = totalIncomesInCycle;
+      }
 
       // Sum all budgeted amounts for categories assigned to this account
       const totalBudgeted = categories
@@ -232,7 +243,6 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     return map;
   }, [
     accounts,
-    accountBalances,
     incomes,
     categories,
     defaultAccountId,
@@ -926,14 +936,20 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                                   <option value="" disabled>
                                     Select Account
                                   </option>
-                                  {accounts.map((acc) => {
-                                    const bal = accountBalances?.[acc.id] ?? (acc.currentBalance ?? acc.openingBalance ?? 0);
-                                    return (
-                                      <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
-                                        {acc.name} (Bal: {formatZARCompact(bal)})
-                                      </option>
-                                    );
-                                  })}
+                                  {accounts
+                                    .filter((acc) => !['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type))
+                                    .map((acc) => {
+                                      const isCreditCard = acc.type === 'credit_card';
+                                      const creditLimit = acc.creditLimit || 0;
+                                      const balOwed = acc.currentBalance ?? acc.balanceOwed ?? 0;
+                                      const availableCredit = Math.max(0, creditLimit - balOwed);
+                                      const bal = acc.currentBalance ?? acc.openingBalance ?? 0;
+                                      return (
+                                        <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
+                                          {acc.name} ({isCreditCard ? `Avail: ${formatZARCompact(availableCredit)}` : `Bal: ${formatZARCompact(bal)}`})
+                                        </option>
+                                      );
+                                    })}
                                 </select>
                               </td>
 
@@ -1090,14 +1106,20 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                                   <option value="" disabled>
                                     Select Account
                                   </option>
-                                  {accounts.map((acc) => {
-                                    const bal = accountBalances?.[acc.id] ?? (acc.currentBalance ?? acc.openingBalance ?? 0);
-                                    return (
-                                      <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
-                                        {acc.name} (Bal: {formatZARCompact(bal)})
-                                      </option>
-                                    );
-                                  })}
+                                  {accounts
+                                    .filter((acc) => !['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type))
+                                    .map((acc) => {
+                                      const isCreditCard = acc.type === 'credit_card';
+                                      const creditLimit = acc.creditLimit || 0;
+                                      const balOwed = acc.currentBalance ?? acc.balanceOwed ?? 0;
+                                      const availableCredit = Math.max(0, creditLimit - balOwed);
+                                      const bal = acc.currentBalance ?? acc.openingBalance ?? 0;
+                                      return (
+                                        <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
+                                          {acc.name} ({isCreditCard ? `Avail: ${formatZARCompact(availableCredit)}` : `Bal: ${formatZARCompact(bal)}`})
+                                        </option>
+                                      );
+                                    })}
                                 </select>
                               </td>
                               <td className="py-2 px-2">
@@ -1465,15 +1487,17 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                             <option value="" disabled>
                               Select Account
                             </option>
-                            {accounts.map((acc) => {
-                              const cap = accountCapacityMap[acc.id];
-                              const rem = cap ? cap.remaining : 0;
-                              return (
-                                <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
-                                  {acc.name} (Avail: {formatZARCompact(rem)})
-                                </option>
-                              );
-                            })}
+                            {accounts
+                              .filter((acc) => !['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type))
+                              .map((acc) => {
+                                const cap = accountCapacityMap[acc.id];
+                                const rem = cap ? cap.remaining : 0;
+                                return (
+                                  <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
+                                    {acc.name} (Avail: {formatZARCompact(rem)})
+                                  </option>
+                                );
+                              })}
                           </select>
                         </td>
 
@@ -1697,15 +1721,17 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                       <option value="" disabled>
                         Select Account
                       </option>
-                      {accounts.map((acc) => {
-                        const cap = accountCapacityMap[acc.id];
-                        const rem = cap ? cap.remaining : 0;
-                        return (
-                          <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
-                            {acc.name} (Avail: {formatZARCompact(rem)})
-                          </option>
-                        );
-                      })}
+                      {accounts
+                        .filter((acc) => !['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type))
+                        .map((acc) => {
+                          const cap = accountCapacityMap[acc.id];
+                          const rem = cap ? cap.remaining : 0;
+                          return (
+                            <option key={acc.id} value={acc.id} className="bg-[#1C1C1E] text-slate-200">
+                              {acc.name} (Avail: {formatZARCompact(rem)})
+                            </option>
+                          );
+                        })}
                     </select>
                   </td>
                   <td className="py-2 px-3">

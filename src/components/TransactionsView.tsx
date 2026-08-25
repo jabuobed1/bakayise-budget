@@ -401,10 +401,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                           {isTransfer && !linkedDebt && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[10px] font-bold">
                               <ArrowRightLeft className="w-2.5 h-2.5" />
-                              <span>Internal Transfer</span>
+                              <span>{isExpense ? 'Transfer Out (Expense)' : 'Transfer In (Deposit)'}</span>
                             </span>
                           )}
                         </div>
+                        {tx.principalReduction !== undefined && tx.principalReduction > 0 && (
+                          <p className="text-[10px] text-emerald-400 font-mono mt-0.5">
+                            Principal Reduced: {formatZAR(tx.principalReduction)}
+                            {tx.interestCharged ? ` · Interest: ${formatZAR(tx.interestCharged)}` : ''}
+                            {tx.feesCharged ? ` · Fee: ${formatZAR(tx.feesCharged)}` : ''}
+                          </p>
+                        )}
                         {tx.notes && <p className="text-[11px] text-slate-500 truncate max-w-[220px] mt-0.5">{tx.notes}</p>}
                       </div>
                     </td>

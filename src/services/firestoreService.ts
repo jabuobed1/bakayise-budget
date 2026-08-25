@@ -13,6 +13,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from '../firebase/config';
+import { calculateDebtReduction } from '../utils/debtCalculations';
 import {
   BudgetPeriod,
   Income,
@@ -749,38 +750,171 @@ export async function deleteIncome(incomeId: string, transferId?: string): Promi
   try {
     const incRef = doc(db, 'incomes', incomeId);
     const incSnap = await getDoc(incRef);
+
     if (incSnap.exists()) {
       const incData = incSnap.data() as Income;
-      if (incData.status === 'received' && incData.accountId) {
-        const accRef = doc(db, 'financial_accounts', incData.accountId);
-        const accSnap = await getDoc(accRef);
-        if (accSnap.exists()) {
-          const accData = accSnap.data() as FinancialAccount;
-          const cur =
-            accData.currentBalance !== undefined
-              ? accData.currentBalance
-              : accData.openingBalance || 0;
-          const newBalance = cur - (incData.amount || 0);
-          await updateDoc(accRef, {
-            currentBalance: newBalance,
-            updatedAt: new Date().toISOString(),
-          });
+      const linkedExpenseId = incData.linkedExpenseId;
+      const actualTransferId = transferId || incData.transferId;
+
+      // Check if this income is paired with an expense (Internal Transfer / Debt Payment)
+      let pairedExpense: Expense | null = null;
+      let pairedExpDocRef = null;
+
+      if (linkedExpenseId) {
+        const pRef = doc(db, 'expenses', linkedExpenseId);
+        const pSnap = await getDoc(pRef);
+        if (pSnap.exists()) {
+          pairedExpense = pSnap.data() as Expense;
+          pairedExpDocRef = pRef;
+        }
+      } else if (actualTransferId) {
+        const qExp = query(collection(db, 'expenses'), where('transferId', '==', actualTransferId));
+        const snapExp = await getDocs(qExp);
+        if (!snapExp.empty) {
+          pairedExpense = snapExp.docs[0].data() as Expense;
+          pairedExpDocRef = snapExp.docs[0].ref;
         }
       }
+
+      if (pairedExpense) {
+        // 1. Refund the source account where the money came from (e.g., Standard Bank)
+        if (pairedExpense.accountId) {
+          const sourceAccRef = doc(db, 'financial_accounts', pairedExpense.accountId);
+          const sourceAccSnap = await getDoc(sourceAccRef);
+          if (sourceAccSnap.exists()) {
+            const sData = sourceAccSnap.data() as FinancialAccount;
+            const curSource =
+              sData.currentBalance !== undefined ? sData.currentBalance : sData.openingBalance || 0;
+            await updateDoc(sourceAccRef, {
+              currentBalance: curSource + pairedExpense.amount,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+
+        // 2. Revert the destination account where the money was deposited (e.g., Home Loan)
+        const destAccountId = pairedExpense.targetAccountId || incData.accountId;
+        if (destAccountId) {
+          const targetAccRef = doc(db, 'financial_accounts', destAccountId);
+          const targetAccSnap = await getDoc(targetAccRef);
+          if (targetAccSnap.exists()) {
+            const tData = targetAccSnap.data() as FinancialAccount;
+            const cur =
+              tData.currentBalance !== undefined ? tData.currentBalance : tData.openingBalance || 0;
+
+            const isLiabilityAccount = [
+              'credit_card',
+              'home_loan',
+              'vehicle_loan',
+              'loan',
+            ].includes(tData.type);
+
+            let revertedBalance: number;
+            if (isLiabilityAccount) {
+              // Restoring debt increases the outstanding balance by the principal reduction
+              const reductionToRevert =
+                pairedExpense.principalReduction !== undefined
+                  ? pairedExpense.principalReduction
+                  : incData.principalReduction !== undefined
+                  ? incData.principalReduction
+                  : pairedExpense.amount;
+              revertedBalance = cur + reductionToRevert;
+            } else {
+              // Asset/Cash bank account: deduct the deposited money
+              revertedBalance = cur - pairedExpense.amount;
+            }
+
+            await updateDoc(targetAccRef, {
+              currentBalance: revertedBalance,
+              ...(isLiabilityAccount ? { balanceOwed: revertedBalance } : {}),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+
+        // 3. Refund debt snowball if linked
+        if (pairedExpense.linkedDebtId) {
+          const debtRef = doc(db, 'debts', pairedExpense.linkedDebtId);
+          const debtSnap = await getDoc(debtRef);
+          if (debtSnap.exists()) {
+            const debtData = debtSnap.data() as Debt;
+            const curDebt = debtData.balance !== undefined ? debtData.balance : 0;
+            const debtReductionToRevert =
+              pairedExpense.principalReduction !== undefined
+                ? pairedExpense.principalReduction
+                : pairedExpense.amount;
+            await updateDoc(debtRef, {
+              balance: curDebt + debtReductionToRevert,
+              status: 'active',
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+      } else {
+        // Standard non-transfer income: revert the account where it was deposited
+        if (incData.status === 'received' && incData.accountId) {
+          const accRef = doc(db, 'financial_accounts', incData.accountId);
+          const accSnap = await getDoc(accRef);
+          if (accSnap.exists()) {
+            const aData = accSnap.data() as FinancialAccount;
+            const cur =
+              aData.currentBalance !== undefined ? aData.currentBalance : aData.openingBalance || 0;
+            const isLiabilityAccount = [
+              'credit_card',
+              'home_loan',
+              'vehicle_loan',
+              'loan',
+            ].includes(aData.type);
+
+            let revertedBalance: number;
+            if (isLiabilityAccount) {
+              const reductionToRevert =
+                incData.principalReduction !== undefined
+                  ? incData.principalReduction
+                  : incData.amount;
+              revertedBalance = cur + reductionToRevert;
+            } else {
+              revertedBalance = cur - incData.amount;
+            }
+
+            await updateDoc(accRef, {
+              currentBalance: revertedBalance,
+              ...(isLiabilityAccount ? { balanceOwed: revertedBalance } : {}),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
+
+      // Batch delete both records
+      const batch = writeBatch(db);
+      batch.delete(incRef);
+
+      if (pairedExpDocRef) {
+        batch.delete(pairedExpDocRef);
+      }
+
+      if (actualTransferId) {
+        const q = query(collection(db, 'expenses'), where('transferId', '==', actualTransferId));
+        const snap = await getDocs(q);
+        snap.forEach((d) => {
+          batch.delete(d.ref);
+        });
+      }
+
+      await batch.commit();
+      return;
     }
 
     const batch = writeBatch(db);
     batch.delete(incRef);
-
     if (transferId) {
-      // Find the linked expense
       const q = query(collection(db, 'expenses'), where('transferId', '==', transferId));
       const snap = await getDocs(q);
       snap.forEach((d) => {
         batch.delete(d.ref);
       });
     }
-
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
@@ -1087,7 +1221,11 @@ export async function saveExpense(expense: Expense): Promise<void> {
       }
     }
 
-    // Direct deduction from Debt Snowball if linked
+    let principalReduction: number | undefined;
+    let interestCharged: number | undefined;
+    let feesCharged: number | undefined;
+
+    // Direct deduction from Debt Snowball or Linked Liability Account
     if (expense.linkedDebtId) {
       const debtRef = doc(db, 'debts', expense.linkedDebtId);
       const debtSnap = await getDoc(debtRef);
@@ -1099,17 +1237,31 @@ export async function saveExpense(expense: Expense): Promise<void> {
           : 0;
         const currentDebtBal = debtData.balance !== undefined ? debtData.balance : 0;
         const restoredDebtBal = currentDebtBal + prevAmount;
-        const newDebtBalance = Math.max(0, restoredDebtBal - expense.amount);
+
+        // Perform calculation strategy based on payment type (installment vs direct deposit)
+        const calc = calculateDebtReduction({
+          currentBalance: restoredDebtBal,
+          paymentAmount: expense.amount,
+          paymentType: expense.debtPaymentType || 'installment',
+          annualInterestRate: debtData.interestRate,
+          monthlyFee: debtData.monthlyFee,
+          debtCategory: debtData.category,
+        });
+
+        principalReduction = calc.principalReduction;
+        interestCharged = calc.interestCharged;
+        feesCharged = calc.feesCharged;
 
         await updateDoc(debtRef, {
-          balance: newDebtBalance,
-          status: newDebtBalance <= 0 ? 'paid_off' : 'active',
+          balance: calc.newBalance,
+          status: calc.newBalance <= 0 ? 'paid_off' : 'active',
           updatedAt: new Date().toISOString(),
         });
       }
     }
 
-    // Destination / Target account update (e.g. card payoff or internal transfer)
+    // Destination / Target account update (e.g. card payoff, bond, vehicle loan, or internal transfer)
+    let autoFoundDebtId = expense.linkedDebtId;
     if (expense.targetAccountId) {
       const targetAccRef = doc(db, 'financial_accounts', expense.targetAccountId);
       const targetAccSnap = await getDoc(targetAccRef);
@@ -1121,20 +1273,137 @@ export async function saveExpense(expense: Expense): Promise<void> {
           : 0;
         const currentTBal =
           tData.currentBalance !== undefined ? tData.currentBalance : tData.openingBalance || 0;
-        const newTBalance = currentTBal - prevAmount + expense.amount;
+
+        // Check if target account is a liability/debt account (e.g., credit card, home loan, vehicle loan, loan)
+        const isLiabilityAccount = ['credit_card', 'home_loan', 'vehicle_loan', 'loan'].includes(tData.type);
+
+        let newTBalance: number;
+        if (isLiabilityAccount) {
+          // In liability accounts, a positive currentBalance / balanceOwed represents debt owed.
+          const restoredDebt = currentTBal + prevAmount;
+          const calc = calculateDebtReduction({
+            currentBalance: restoredDebt,
+            paymentAmount: expense.amount,
+            paymentType: expense.debtPaymentType || 'installment',
+            accountType: tData.type,
+            annualInterestRate: tData.interestRate,
+            monthlyFee: tData.monthlyFee,
+          });
+          newTBalance = calc.newBalance;
+          principalReduction = calc.principalReduction;
+          interestCharged = calc.interestCharged;
+          feesCharged = calc.feesCharged;
+
+          // LIVE SYNC: Find and update the corresponding Debt document in the debts collection (Baby Step 2 Snowball)
+          try {
+            // Check by explicit linkedAccountId or matching id/name
+            const qDebts = query(
+              collection(db, 'debts'),
+              where('linkedAccountId', '==', expense.targetAccountId)
+            );
+            const debtsSnap = await getDocs(qDebts);
+            let targetDebtDoc = !debtsSnap.empty ? debtsSnap.docs[0] : null;
+
+            if (!targetDebtDoc) {
+              const directDebtRef = doc(db, 'debts', expense.targetAccountId);
+              const directDebtSnap = await getDoc(directDebtRef);
+              if (directDebtSnap.exists()) {
+                targetDebtDoc = directDebtSnap as any;
+              }
+            }
+
+            if (!targetDebtDoc && tData.name) {
+              const allDebtsSnap = await getDocs(collection(db, 'debts'));
+              const matching = allDebtsSnap.docs.find(
+                (d) =>
+                  d.data().name?.trim().toLowerCase() === tData.name?.trim().toLowerCase()
+              );
+              if (matching) targetDebtDoc = matching;
+            }
+
+            if (targetDebtDoc) {
+              autoFoundDebtId = targetDebtDoc.id;
+              const debtData = targetDebtDoc.data() as Debt;
+              const curDebtBal = debtData.balance !== undefined ? debtData.balance : 0;
+              const restoredDebtBal = curDebtBal + (prevAmount > 0 ? (calc.principalReduction || prevAmount) : 0);
+              const updatedDebtBal = Math.max(0, restoredDebtBal - calc.principalReduction);
+
+              await updateDoc(targetDebtDoc.ref, {
+                balance: updatedDebtBal,
+                status: updatedDebtBal <= 0 ? 'paid_off' : 'active',
+                paidOffDate: updatedDebtBal <= 0 ? (debtData.paidOffDate || new Date().toISOString()) : undefined,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          } catch (syncErr) {
+            console.warn('Auto debt sync notice:', syncErr);
+          }
+        } else {
+          // Standard Asset / Cash account transfer deposit
+          newTBalance = currentTBal - prevAmount + expense.amount;
+        }
 
         await updateDoc(targetAccRef, {
           currentBalance: newTBalance,
+          ...(isLiabilityAccount ? { balanceOwed: newTBalance } : {}),
           ...audit,
           updatedAt: new Date().toISOString(),
         });
       }
     }
 
+    // Pair Income creation for inter-account / debt transfer representation
+    if (expense.targetAccountId && expense.transferType === 'internal_transfer') {
+      const pairedIncId = `inc_${expense.transferId || expense.id}`;
+      let sourceName = 'Source Account';
+      if (expense.accountId) {
+        try {
+          const sAccSnap = await getDoc(doc(db, 'financial_accounts', expense.accountId));
+          if (sAccSnap.exists()) {
+            sourceName = (sAccSnap.data() as FinancialAccount).name || sourceName;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      await setDoc(
+        doc(db, 'incomes', pairedIncId),
+        cleanFirestoreObject({
+          id: pairedIncId,
+          periodId: expense.periodId,
+          title: `Transfer from ${sourceName}: ${expense.title}`,
+          amount: expense.amount,
+          type: 'other',
+          sourceTag: 'Internal Transfer',
+          status: 'received',
+          receivedDate: expense.date,
+          accountId: expense.targetAccountId,
+          notes: expense.notes,
+          transferId: expense.transferId || expense.id,
+          linkedExpenseId: expense.id,
+          linkedDebtId: autoFoundDebtId,
+          debtPaymentType: expense.debtPaymentType,
+          principalReduction,
+          interestCharged,
+          feesCharged,
+          householdId: wsId || undefined,
+          workspaceId: wsId || undefined,
+          ...audit,
+          createdAt: expense.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    }
+
     await setDoc(
       doc(db, 'expenses', expense.id),
       cleanFirestoreObject({
         ...expense,
+        linkedDebtId: autoFoundDebtId,
+        principalReduction,
+        interestCharged,
+        feesCharged,
         balanceBefore,
         balanceAfter,
         accountBalanceAtTransactionTime: accBalanceAtTime,
@@ -1198,7 +1467,7 @@ export async function deleteExpense(expenseId: string, transferId?: string): Pro
     const expSnap = await getDoc(expRef);
     if (expSnap.exists()) {
       const expData = expSnap.data() as Expense;
-      // Refund source account
+      // 1. Refund source account
       if (expData.accountId) {
         const accRef = doc(db, 'financial_accounts', expData.accountId);
         const accSnap = await getDoc(accRef);
@@ -1215,7 +1484,8 @@ export async function deleteExpense(expenseId: string, transferId?: string): Pro
           });
         }
       }
-      // Revert destination account if transfer
+
+      // 2. Revert destination account if transfer or card/loan payment
       if (expData.targetAccountId) {
         const targetAccRef = doc(db, 'financial_accounts', expData.targetAccountId);
         const targetAccSnap = await getDoc(targetAccRef);
@@ -1223,22 +1493,36 @@ export async function deleteExpense(expenseId: string, transferId?: string): Pro
           const tData = targetAccSnap.data() as FinancialAccount;
           const cur =
             tData.currentBalance !== undefined ? tData.currentBalance : tData.openingBalance || 0;
-          const revertedBalance = cur - expData.amount;
+          
+          const isLiabilityAccount = ['credit_card', 'home_loan', 'vehicle_loan', 'loan'].includes(tData.type);
+          let revertedBalance: number;
+          if (isLiabilityAccount) {
+            // For liability/debts: restoring debt increases the balance owed by the paid/principal reduction amount
+            const reductionToRevert = expData.principalReduction !== undefined ? expData.principalReduction : expData.amount;
+            revertedBalance = cur + reductionToRevert;
+          } else {
+            // For asset/cash bank account: deduct the deposited money
+            revertedBalance = cur - expData.amount;
+          }
+
           await updateDoc(targetAccRef, {
             currentBalance: revertedBalance,
+            ...(isLiabilityAccount ? { balanceOwed: revertedBalance } : {}),
             updatedAt: new Date().toISOString(),
           });
         }
       }
-      // Refund debt snowball if linked
+
+      // 3. Refund debt snowball if linked
       if (expData.linkedDebtId) {
         const debtRef = doc(db, 'debts', expData.linkedDebtId);
         const debtSnap = await getDoc(debtRef);
         if (debtSnap.exists()) {
           const debtData = debtSnap.data() as Debt;
           const curDebt = debtData.balance !== undefined ? debtData.balance : 0;
+          const debtReductionToRevert = expData.principalReduction !== undefined ? expData.principalReduction : expData.amount;
           await updateDoc(debtRef, {
-            balance: curDebt + expData.amount,
+            balance: curDebt + debtReductionToRevert,
             status: 'active',
             updatedAt: new Date().toISOString(),
           });
@@ -1249,13 +1533,26 @@ export async function deleteExpense(expenseId: string, transferId?: string): Pro
     const batch = writeBatch(db);
     batch.delete(expRef);
 
+    // Delete paired incoming record if linked via transferId or linkedExpenseId
     if (transferId) {
-      // Find the linked income
       const q = query(collection(db, 'incomes'), where('transferId', '==', transferId));
       const snap = await getDocs(q);
       snap.forEach((d) => {
         batch.delete(d.ref);
       });
+    }
+
+    // Also check for income linked specifically by linkedExpenseId or direct ID
+    const qExp = query(collection(db, 'incomes'), where('linkedExpenseId', '==', expenseId));
+    const snapExp = await getDocs(qExp);
+    snapExp.forEach((d) => {
+      batch.delete(d.ref);
+    });
+
+    const directPairedRef = doc(db, 'incomes', `inc_${expenseId}`);
+    const directPairedSnap = await getDoc(directPairedRef);
+    if (directPairedSnap.exists()) {
+      batch.delete(directPairedRef);
     }
 
     await batch.commit();

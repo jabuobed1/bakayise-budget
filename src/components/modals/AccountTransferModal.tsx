@@ -134,11 +134,13 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
                 required
                 className="w-full bg-[#1C1C1E] border border-white/10 rounded-[12px] px-3 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer"
               >
-                {accounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name} ({formatZAR(getBalance(acc))})
-                  </option>
-                ))}
+                {accounts
+                  .filter((acc) => !['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type))
+                  .map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name} ({formatZAR(getBalance(acc))})
+                    </option>
+                  ))}
               </select>
             </div>
 

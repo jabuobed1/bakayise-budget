@@ -808,14 +808,21 @@ export const IncomeModal: React.FC<IncomeModalProps> = ({
                 required
                 className="w-full bg-[#2C2C2E] border border-white/10 text-white px-3.5 py-2.5 rounded-[14px] text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#30D158]"
               >
-                {accounts.map((acc) => {
-                  const bal = accountBalances?.[acc.id] ?? (acc.currentBalance ?? acc.openingBalance ?? 0);
-                  return (
-                    <option key={acc.id} value={acc.id} className="bg-[#1C1C1E]">
-                      {acc.name} ({acc.type}) — Bal: {formatZAR(bal)}
-                    </option>
-                  );
-                })}
+                {accounts
+                  .filter((acc) => !['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type))
+                  .map((acc) => {
+                    const isCreditCard = acc.type === 'credit_card';
+                    const creditLimit = acc.creditLimit || 0;
+                    const balOwed = acc.currentBalance ?? acc.balanceOwed ?? 0;
+                    const availableCredit = Math.max(0, creditLimit - balOwed);
+                    const bal = acc.currentBalance ?? acc.openingBalance ?? 0;
+                    
+                    return (
+                      <option key={acc.id} value={acc.id} className="bg-[#1C1C1E]">
+                        {acc.name} ({acc.institution || acc.type}) {isCreditCard ? `— Avail Credit: ${formatZAR(availableCredit)}` : `— Bal: ${formatZAR(bal)}`}
+                      </option>
+                    );
+                  })}
               </select>
             </div>
 

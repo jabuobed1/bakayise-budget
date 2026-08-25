@@ -785,134 +785,20 @@ function BakayiseAppContent() {
 
   // Sync Debt balance and Transfer accounts when saving expenses
   const handleSaveExpenseWithSync = async (exp: Expense) => {
-    const oldExp = expenses.find((e) => e.id === exp.id) || allWorkspaceExpenses.find((e) => e.id === exp.id);
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // 1. Debt balance sync
-    if (exp.linkedDebtId) {
-      const targetDebt = debts.find((d) => d.id === exp.linkedDebtId);
-      if (targetDebt) {
-        if (oldExp && oldExp.linkedDebtId === exp.linkedDebtId) {
-          // Adjust difference on same debt
-          const delta = exp.amount - oldExp.amount;
-          const newBalance = Math.max(0, targetDebt.balance - delta);
-          await updateDebt(targetDebt.id, {
-            balance: newBalance,
-            status: newBalance === 0 ? 'paid_off' : 'active',
-            paidOffDate: newBalance === 0 ? (targetDebt.paidOffDate || todayStr) : undefined,
-            updatedAt: new Date().toISOString(),
-          });
-        } else {
-          // Unlink old debt if previously linked to a different debt
-          if (oldExp?.linkedDebtId && oldExp.linkedDebtId !== exp.linkedDebtId) {
-            const oldDebt = debts.find((d) => d.id === oldExp.linkedDebtId);
-            if (oldDebt) {
-              const restoredBal = oldDebt.balance + oldExp.amount;
-              await updateDebt(oldDebt.id, {
-                balance: restoredBal,
-                status: 'active',
-                paidOffDate: undefined,
-                updatedAt: new Date().toISOString(),
-              });
-            }
-          }
-          // Deduct from newly linked debt
-          const newBalance = Math.max(0, targetDebt.balance - exp.amount);
-          await updateDebt(targetDebt.id, {
-            balance: newBalance,
-            status: newBalance === 0 ? 'paid_off' : 'active',
-            paidOffDate: newBalance === 0 ? (targetDebt.paidOffDate || todayStr) : undefined,
-            updatedAt: new Date().toISOString(),
-          });
-        }
-      }
-    } else if (oldExp?.linkedDebtId) {
-      // User unlinked the debt
-      const oldDebt = debts.find((d) => d.id === oldExp.linkedDebtId);
-      if (oldDebt) {
-        const restoredBal = oldDebt.balance + oldExp.amount;
-        await updateDebt(oldDebt.id, {
-          balance: restoredBal,
-          status: 'active',
-          paidOffDate: undefined,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    }
-
-    // 2. Internal Transfer sync (if targetAccountId is specified and internal transfer)
-    if (exp.targetAccountId && exp.transferType === 'internal_transfer') {
-      const sourceAcc = accounts.find((a) => a.id === exp.accountId);
-      const destAcc = accounts.find((a) => a.id === exp.targetAccountId);
-      if (sourceAcc && destAcc && currentPeriod) {
-        const transferId = exp.transferId || `transfer_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        const transferExpense: Expense = {
-          ...exp,
-          transferId,
-        };
-        const transferIncome: Income = {
-          id: `inc_${transferId}`,
-          periodId: exp.periodId || currentPeriod.id,
-          title: `Transfer from ${sourceAcc.name}: ${exp.title}`,
-          amount: exp.amount,
-          type: 'other',
-          sourceTag: 'Internal Transfer',
-          status: 'received',
-          receivedDate: exp.date,
-          accountId: destAcc.id,
-          notes: exp.notes,
-          transferId: transferId,
-          householdId: activeWorkspaceId || undefined,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        await executeTransfer(transferExpense, transferIncome);
-        return;
-      }
-    }
-
     await saveExpense(exp);
   };
 
   // Sync Debt balance when batch saving multiple expenses
   const handleBatchSaveExpensesWithSync = async (bulkExps: Expense[]) => {
     for (const exp of bulkExps) {
-      if (exp.linkedDebtId) {
-        const targetDebt = debts.find((d) => d.id === exp.linkedDebtId);
-        if (targetDebt) {
-          const newBalance = Math.max(0, targetDebt.balance - exp.amount);
-          await updateDebt(targetDebt.id, {
-            balance: newBalance,
-            status: newBalance === 0 ? 'paid_off' : 'active',
-            paidOffDate: newBalance === 0 ? new Date().toISOString().split('T')[0] : undefined,
-            updatedAt: new Date().toISOString(),
-          });
-        }
-      }
+      await saveExpense(exp);
     }
-    await batchSaveExpenses(bulkExps);
   };
 
   // Sync Debt balance when deleting an expense
   const handleDeleteExpenseWithSync = async (expId: string) => {
     const exp = expenses.find((e) => e.id === expId) || allWorkspaceExpenses.find((e) => e.id === expId);
-    if (exp) {
-      if (exp.linkedDebtId) {
-        const targetDebt = debts.find((d) => d.id === exp.linkedDebtId);
-        if (targetDebt) {
-          const restoredBalance = targetDebt.balance + exp.amount;
-          await updateDebt(targetDebt.id, {
-            balance: restoredBalance,
-            status: 'active',
-            paidOffDate: undefined,
-            updatedAt: new Date().toISOString(),
-          });
-        }
-      }
-      await deleteExpense(expId, exp.transferId);
-    } else {
-      await deleteExpense(expId);
-    }
+    await deleteExpense(expId, exp?.transferId);
   };
 
   // Quick Action Sheet Trigger Handler
@@ -1732,6 +1618,7 @@ function BakayiseAppContent() {
             saveDebt({ ...d, householdId: activeWorkspaceId, workspaceId: activeWorkspaceId });
           }}
           initialDebt={editingDebt}
+          accounts={accounts}
         />
 
         <WorkspaceGatekeeperModal isOpen={isAuthorized && !activeWorkspaceId} />

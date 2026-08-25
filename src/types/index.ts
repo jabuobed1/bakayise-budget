@@ -131,6 +131,11 @@ export interface Income extends EditAuditInfo {
   order?: number; // Position in Excel list
   notes?: string;
   transferId?: string; // Link related transfer entries
+  linkedExpenseId?: string; // Link to corresponding expense
+  debtPaymentType?: 'installment' | 'direct_deposit';
+  principalReduction?: number;
+  interestCharged?: number;
+  feesCharged?: number;
   balanceBefore?: number; // Snapshot of account balance prior to receiving income
   balanceAfter?: number; // Snapshot of account balance immediately following receiving income
   accountBalanceAtTransactionTime?: number; // Balance at transaction time
@@ -172,6 +177,10 @@ export interface Expense extends EditAuditInfo {
   linkedDebtId?: string; // Optional: Link to a Debt snowball item to deduct balance
   targetAccountId?: string; // Optional: Destination account for internal transfers / card payoffs
   transferType?: 'standard' | 'debt_payment' | 'internal_transfer';
+  debtPaymentType?: 'installment' | 'direct_deposit'; // 'installment' applies interest/fees amortization rules; 'direct_deposit' is 100% principal reduction
+  principalReduction?: number; // Calculated amount reducing the principal balance
+  interestCharged?: number; // Calculated interest portion of payment
+  feesCharged?: number; // Calculated service fee portion of payment
   balanceBefore?: number; // Snapshot of account balance prior to transaction
   balanceAfter?: number; // Snapshot of account balance immediately following transaction
   accountBalanceAtTransactionTime?: number; // Balance at transaction time
@@ -196,6 +205,7 @@ export interface Debt extends EditAuditInfo {
   originalBalance: number;
   minimumPayment: number;
   interestRate: number; // Annual %
+  monthlyFee?: number; // Monthly administrative or service fee (e.g. R69 or R0)
   linkedAccountId?: string;
   order?: number;
   status: 'active' | 'paid_off';
