@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { FinancialAccount, Income, Expense, BudgetCategory, AccountType, BudgetPeriod } from '../types';
-import { ACCOUNT_TYPES, SOUTH_AFRICAN_INSTITUTIONS } from '../utils/budgetConstants';
+import { ACCOUNT_TYPES, SOUTH_AFRICAN_INSTITUTIONS, isInternalTransferExpense } from '../utils/budgetConstants';
 import { formatZAR, formatZARCompact, formatDateNice } from '../utils/southAfricaHolidays';
 import { SA_BANK_PROFILES, SABankCode, BankFeeRule } from '../utils/bankChargesEngine';
 import { FigmaIcon } from './ui/FigmaIcon';
@@ -307,13 +307,16 @@ export const AccountsManager: React.FC<AccountsManagerProps> = ({
 
     // Add Expenses
     for (const exp of st.linkedExpenses) {
-      const cat = categoryMap.get(exp.categoryId);
+      const isTransfer = isInternalTransferExpense(exp);
+      const cat = isTransfer ? null : categoryMap.get(exp.categoryId);
       const p = exp.periodId ? periodMap.get(exp.periodId) : null;
       items.push({
         id: exp.id,
         date: exp.date || exp.createdAt,
-        title: exp.title || exp.description || cat?.name || 'Expense',
-        subtitle: `Expense · ${cat?.name || 'Uncategorized'}${exp.paymentMethod ? ` · ${exp.paymentMethod}` : ''}${p?.name ? ` · ${p.name}` : ''}`,
+        title: exp.title || exp.description || (isTransfer ? 'Transfer Out' : cat?.name || 'Expense'),
+        subtitle: isTransfer
+          ? `Transfer Out · ${exp.paymentMethod || 'Electronic'}${p?.name ? ` · ${p.name}` : ''}`
+          : `Expense · ${cat?.name || 'Uncategorized'}${exp.paymentMethod ? ` · ${exp.paymentMethod}` : ''}${p?.name ? ` · ${p.name}` : ''}`,
         type: 'outflow',
         amount: exp.amount || 0,
         paymentMethod: exp.paymentMethod,

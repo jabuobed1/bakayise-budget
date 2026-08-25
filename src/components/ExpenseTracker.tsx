@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Expense, BudgetCategory, LoggedBy, FinancialAccount } from '../types';
 import { formatZAR, formatDateNice } from '../utils/southAfricaHolidays';
+import { isInternalTransferExpense, isExternalExpense } from '../utils/budgetConstants';
 import { FigmaIcon } from './ui/FigmaIcon';
 import { LastEditTag } from './ui/LastEditTag';
-import { Search, Plus, Edit2, Trash2, Calendar, CreditCard, User, Users, Landmark } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, Calendar, CreditCard, User, Users, Landmark, ArrowRightLeft } from 'lucide-react';
 
 interface ExpenseTrackerProps {
   expenses: Expense[];
@@ -272,7 +273,8 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
         ) : (
           <div className="divide-y divide-white/[0.06]">
             {filteredExpenses.map((exp) => {
-              const cat = categoryMap.get(exp.categoryId);
+              const isTransfer = isInternalTransferExpense(exp);
+              const cat = isTransfer ? null : categoryMap.get(exp.categoryId);
               const acc = exp.accountId ? accountMap.get(exp.accountId) : null;
               const isHubby = (exp.loggedBy || '').toLowerCase().includes('hubby') || (exp.loggedBy || '').toLowerCase().includes('husband');
               const isWifey = (exp.loggedBy || '').toLowerCase().includes('wifey') || (exp.loggedBy || '').toLowerCase().includes('wife');
@@ -287,11 +289,15 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
                     <div
                       className="w-9 h-9 rounded-[12px] flex items-center justify-center shrink-0 mt-0.5 border border-white/10"
                       style={{
-                        backgroundColor: `${cat?.color || '#30D158'}20`,
-                        color: cat?.color || '#30D158',
+                        backgroundColor: isTransfer ? 'rgba(56, 189, 248, 0.15)' : `${cat?.color || '#30D158'}20`,
+                        color: isTransfer ? '#38bdf8' : cat?.color || '#30D158',
                       }}
                     >
-                      <FigmaIcon name="receipt" size="sm" strokeWidth={2.2} />
+                      {isTransfer ? (
+                        <ArrowRightLeft className="w-4 h-4 text-sky-400" />
+                      ) : (
+                        <FigmaIcon name="receipt" size="sm" strokeWidth={2.2} />
+                      )}
                     </div>
 
                     <div className="min-w-0">
@@ -300,7 +306,14 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
                           {exp.title}
                         </h4>
 
-                        {cat && (
+                        {isTransfer ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full border whitespace-nowrap bg-sky-500/15 border-sky-500/40 text-sky-300 flex items-center gap-1">
+                              <ArrowRightLeft className="w-2.5 h-2.5" />
+                              <span>Transfer</span>
+                            </span>
+                          </div>
+                        ) : cat ? (
                           <div className="flex items-center gap-1">
                             <span
                               className="text-[10px] font-semibold px-2 py-0.2 rounded-full border whitespace-nowrap"
@@ -318,7 +331,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
                               </span>
                             )}
                           </div>
-                        )}
+                        ) : null}
 
                         {acc && (
                           <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap flex items-center gap-1">

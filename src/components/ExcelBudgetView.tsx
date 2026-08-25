@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { BudgetCategory, Expense, Income, CategoryGroup, FinancialAccount, AccountType, BudgetPeriod } from '../types';
-import { CATEGORY_GROUPS, COMMON_CATEGORY_TAGS, ACCOUNT_TYPES, isExternalIncome } from '../utils/budgetConstants';
+import { CATEGORY_GROUPS, COMMON_CATEGORY_TAGS, ACCOUNT_TYPES, isExternalIncome, isExternalExpense } from '../utils/budgetConstants';
 import { formatZAR, formatZARCompact, formatDateNice } from '../utils/southAfricaHolidays';
 import { evaluateMathExpression, formatMathLivePreview, isMathExpression } from '../utils/mathEvaluator';
 import { FigmaIcon, FigmaIconName } from './ui/FigmaIcon';
@@ -261,16 +261,21 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     return accountCapacityMap[targetId] || null;
   };
 
+  // Filter true external expenses (exclude internal transfers between accounts)
+  const externalExpenses = useMemo(() => {
+    return expenses.filter(isExternalExpense);
+  }, [expenses]);
+
   // Compute spent amount per category
   const spentByCategoryId = useMemo(() => {
     const map: Record<string, number> = {};
     const countMap: Record<string, number> = {};
-    for (const exp of expenses) {
+    for (const exp of externalExpenses) {
       map[exp.categoryId] = (map[exp.categoryId] || 0) + exp.amount;
       countMap[exp.categoryId] = (countMap[exp.categoryId] || 0) + 1;
     }
     return { map, countMap };
-  }, [expenses]);
+  }, [externalExpenses]);
 
   // Total Planned & Received Incomes (True external income only)
   const totalPlannedIncome = useMemo(() => {
@@ -283,14 +288,14 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
       .reduce((sum, inc) => sum + (inc.amount || 0), 0);
   }, [externalIncomes]);
 
-  // Total Budgeted & Actual Expenses
+  // Total Budgeted & Actual Expenses (True external spending only)
   const totalBudgetedExpenses = useMemo(() => {
     return categories.reduce((sum, cat) => sum + (cat.allocatedAmount || 0), 0);
   }, [categories]);
 
   const totalActualSpent = useMemo(() => {
-    return expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
-  }, [expenses]);
+    return externalExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+  }, [externalExpenses]);
 
   const unassignedZeroBased = totalPlannedIncome - totalBudgetedExpenses;
   const netBankBalance = totalReceivedIncome - totalActualSpent;

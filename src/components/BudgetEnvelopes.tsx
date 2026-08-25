@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BudgetCategory, Expense, CategoryGroup } from '../types';
-import { CATEGORY_GROUPS } from '../utils/budgetConstants';
+import { CATEGORY_GROUPS, isExternalExpense } from '../utils/budgetConstants';
 import { formatZAR, formatZARCompact } from '../utils/southAfricaHolidays';
 import { FigmaIcon, FigmaIconName } from './ui/FigmaIcon';
 import { Plus, Edit2, Trash2, Check, AlertCircle } from 'lucide-react';
@@ -48,9 +48,9 @@ export const BudgetEnvelopes: React.FC<BudgetEnvelopesProps> = ({
 }) => {
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('all');
 
-  // Compute total spent per category
+  // Compute total spent per category (exclude internal transfers)
   const spentByCategoryId: Record<string, number> = {};
-  for (const exp of expenses) {
+  for (const exp of expenses.filter(isExternalExpense)) {
     spentByCategoryId[exp.categoryId] = (spentByCategoryId[exp.categoryId] || 0) + exp.amount;
   }
 

@@ -128,6 +128,9 @@ export interface Income extends EditAuditInfo {
   isTransfer?: boolean;
   sourceTag?: string;
   accountId?: string; // Destination financial account
+  sourceAccountId?: string; // Source financial account for transfers
+  targetAccountId?: string; // Destination financial account (alias for clarity)
+  transferType?: 'standard' | 'debt_payment' | 'internal_transfer';
   receivedDate?: string;
   status: 'expected' | 'received';
   order?: number; // Position in Excel list
@@ -172,6 +175,8 @@ export interface Expense extends EditAuditInfo {
   title: string;
   date: string; // YYYY-MM-DD
   loggedBy: LoggedBy;
+  expenseClassification?: 'external_expense' | 'internal_transfer' | 'debt_payment';
+  isTransfer?: boolean;
   accountId?: string; // Source financial account paid from
   paymentMethod?: string;
   notes?: string;

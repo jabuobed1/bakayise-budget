@@ -425,12 +425,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     </td>
                     <td className="py-4 px-6">
                       <div className="space-y-1">
-                        {cat && (
+                        {isTransfer ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-sky-300">
+                            <ArrowRightLeft className="w-3 h-3 text-sky-400" />
+                            <span className="font-semibold">Transfer</span>
+                          </div>
+                        ) : cat ? (
                           <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
                             <Tag className="w-3 h-3 text-slate-500" />
                             <span>{cat.name}</span>
                           </div>
-                        )}
+                        ) : null}
                         {acc && (
                           <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
                             <CreditCard className="w-3 h-3 text-slate-600" />

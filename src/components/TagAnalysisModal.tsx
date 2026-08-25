@@ -1,6 +1,6 @@
 import React from 'react';
 import { BudgetCategory, Expense } from '../types';
-import { COMMON_CATEGORY_TAGS } from '../utils/budgetConstants';
+import { COMMON_CATEGORY_TAGS, isExternalExpense } from '../utils/budgetConstants';
 import { formatZAR, formatZARCompact } from '../utils/southAfricaHolidays';
 import { FigmaIcon } from './ui/FigmaIcon';
 import { X, Tag, PieChart, TrendingUp, AlertCircle, CheckCircle2 } from 'lucide-react';
@@ -22,9 +22,9 @@ export const TagAnalysisModal: React.FC<TagAnalysisModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  // Calculate spent per category
+  // Calculate spent per category (exclude internal transfers)
   const spentByCategoryId: Record<string, number> = {};
-  for (const exp of expenses) {
+  for (const exp of expenses.filter(isExternalExpense)) {
     spentByCategoryId[exp.categoryId] = (spentByCategoryId[exp.categoryId] || 0) + exp.amount;
   }
 

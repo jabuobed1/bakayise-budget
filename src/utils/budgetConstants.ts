@@ -1,4 +1,4 @@
-import { CategoryGroup, DebtCategory, IncomeType, AccountType, FinancialAccount, Income } from '../types';
+import { CategoryGroup, DebtCategory, IncomeType, AccountType, FinancialAccount, Income, Expense } from '../types';
 
 export interface DefaultCategoryTemplate {
   name: string;
@@ -408,6 +408,44 @@ export function isExternalIncome(inc: Income): boolean {
     (inc.title && (inc.title.startsWith('Transfer from ') || inc.title.startsWith('Transfer to ')))
   ) {
     return false;
+  }
+  return true;
+}
+
+/**
+ * Checks if an expense is an internal transfer between user accounts.
+ */
+export function isInternalTransferExpense(exp: Expense): boolean {
+  if (exp.expenseClassification === 'internal_transfer') {
+    return true;
+  }
+  if (exp.isTransfer === true) {
+    return true;
+  }
+  if (exp.categoryId === 'transfer' || exp.categoryId === 'cat_transfer' || exp.categoryId === 'cat_atm_deposit') {
+    return true;
+  }
+  if (
+    Boolean(exp.transferId) ||
+    (exp.title && (exp.title.startsWith('Transfer to ') || exp.title.startsWith('ATM Cash Deposit to '))) ||
+    exp.id.startsWith('exp_transfer_') ||
+    exp.id.startsWith('exp_atmdep_')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Checks if an expense is a true external expense (e.g. groceries, electricity, living expenses, debt payments)
+ * that counts towards monthly living expenditure and zero-based budget envelope spend.
+ */
+export function isExternalExpense(exp: Expense): boolean {
+  if (isInternalTransferExpense(exp)) {
+    return false;
+  }
+  if (exp.expenseClassification === 'external_expense' || exp.expenseClassification === 'debt_payment') {
+    return true;
   }
   return true;
 }

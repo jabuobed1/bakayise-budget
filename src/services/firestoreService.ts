@@ -776,6 +776,16 @@ export async function deleteIncome(incomeId: string, transferId?: string): Promi
         }
       }
 
+      if (!pairedExpense && incomeId.startsWith('inc_')) {
+        const correspondingExpId = incomeId.replace(/^inc_/, 'exp_');
+        const pRef = doc(db, 'expenses', correspondingExpId);
+        const pSnap = await getDoc(pRef);
+        if (pSnap.exists()) {
+          pairedExpense = pSnap.data() as Expense;
+          pairedExpDocRef = pRef;
+        }
+      }
+
       if (pairedExpense) {
         // 1. Refund the source account where the money came from (e.g., Standard Bank)
         if (pairedExpense.accountId) {
@@ -1514,8 +1524,36 @@ export async function deleteExpense(expenseId: string, transferId?: string): Pro
       }
 
       // 2. Revert destination account if transfer or card/loan payment
-      if (expData.targetAccountId) {
-        const targetAccRef = doc(db, 'financial_accounts', expData.targetAccountId);
+      let destAccId = expData.targetAccountId;
+      let pairedIncomeForExp: Income | null = null;
+      let pairedIncDocRef = null;
+
+      // Look up paired income document if targetAccountId is not directly present on expData
+      const effectiveTransferId = transferId || expData.transferId;
+      if (effectiveTransferId) {
+        const qInc = query(collection(db, 'incomes'), where('transferId', '==', effectiveTransferId));
+        const snapInc = await getDocs(qInc);
+        if (!snapInc.empty) {
+          pairedIncomeForExp = snapInc.docs[0].data() as Income;
+          pairedIncDocRef = snapInc.docs[0].ref;
+          if (!destAccId) {
+            destAccId = pairedIncomeForExp.accountId || pairedIncomeForExp.targetAccountId;
+          }
+        }
+      }
+
+      if (!destAccId) {
+        const directIncRef = doc(db, 'incomes', `inc_${expenseId}`);
+        const directIncSnap = await getDoc(directIncRef);
+        if (directIncSnap.exists()) {
+          pairedIncomeForExp = directIncSnap.data() as Income;
+          pairedIncDocRef = directIncRef;
+          destAccId = pairedIncomeForExp.accountId || pairedIncomeForExp.targetAccountId;
+        }
+      }
+
+      if (destAccId) {
+        const targetAccRef = doc(db, 'financial_accounts', destAccId);
         const targetAccSnap = await getDoc(targetAccRef);
         if (targetAccSnap.exists()) {
           const tData = targetAccSnap.data() as FinancialAccount;
