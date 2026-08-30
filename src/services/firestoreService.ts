@@ -1631,11 +1631,16 @@ export async function executeTransfer(expense: Expense, income: Income): Promise
   const path = 'transfers/execute';
   try {
     const wsId = expense.householdId || income.householdId;
-    const audit = getAuditFields(wsId);
-
-    // Save expense and income using saveExpense and saveIncome to properly update both accounts' direct balances
-    await saveExpense({ ...expense, householdId: wsId, workspaceId: wsId });
-    await saveIncome({ ...income, householdId: wsId, workspaceId: wsId });
+    // Calling saveExpense with targetAccountId and transferType: 'internal_transfer'
+    // accurately handles debiting source account, crediting destination account,
+    // saving the expense record, and generating the corresponding paired received income document.
+    await saveExpense({
+      ...expense,
+      targetAccountId: expense.targetAccountId || income.accountId,
+      transferType: 'internal_transfer',
+      householdId: wsId,
+      workspaceId: wsId,
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }

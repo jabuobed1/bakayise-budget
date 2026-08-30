@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Expense, BudgetCategory, LoggedBy, FinancialAccount, Debt } from '../../types';
 import { PAYMENT_METHODS } from '../../utils/budgetConstants';
 import { evaluateMathExpression, formatMathLivePreview, isMathExpression } from '../../utils/mathEvaluator';
 import { formatZAR } from '../../utils/southAfricaHolidays';
 import { calculateDebtReduction } from '../../utils/debtCalculations';
+import { checkDuplicateExpense, analyzeBatchRowDuplicates, DuplicateMatchResult } from '../../utils/duplicateExpenseDetector';
 import { FigmaIcon } from '../ui/FigmaIcon';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -17,6 +18,7 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Landmark,
   ArrowRight,
   RefreshCw,
@@ -28,6 +30,7 @@ import {
   Square,
   Target,
   ArrowRightLeft,
+  Check,
 } from 'lucide-react';
 import { scanExpenseReceipt, ScannedExpenseResult } from '../../services/aiReceiptScanner';
 
@@ -43,6 +46,7 @@ interface ExpenseModalProps {
   accounts?: FinancialAccount[];
   debts?: Debt[];
   onOpenAtmDepositModal?: () => void;
+  existingExpenses?: Expense[];
 }
 
 const COMMON_SA_MERCHANTS = [
@@ -81,7 +85,10 @@ export interface BulkExpenseRow {
   categoryId: string;
   accountId: string;
   amount: number;
+  loggedBy: LoggedBy;
   paymentMethod: string;
+  linkedSelection: string;
+  debtPaymentType?: 'installment' | 'direct_deposit';
   notes: string;
   selected: boolean;
 }
@@ -98,6 +105,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   accounts = [],
   debts = [],
   onOpenAtmDepositModal,
+  existingExpenses = [],
 }) => {
   const { member } = useAuth();
   const defaultMember: LoggedBy = member?.role === 'Wifey' ? 'Wifey' : 'Hubby';
@@ -192,8 +200,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     }
   }, [initialExpense, defaultCategoryId, categories, isOpen, accounts, debts, defaultMember]);
 
-  if (!isOpen) return null;
-
   // Handle Category Change & auto-suggest account
   const handleCategoryChange = (newCatId: string) => {
     setCategoryId(newCatId);
@@ -275,17 +281,23 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
     if (isBulk || scannedList.length > 1) {
       // BULK EXPENSES MODE (e.g., Bank Statement / Multi-line scan)
-      const rows: BulkExpenseRow[] = scannedList.map((item, idx) => ({
-        id: `bulk_row_${Date.now()}_${idx}`,
-        date: item.date || new Date().toISOString().split('T')[0],
-        merchant: item.merchant || item.description || `Scanned Item #${idx + 1}`,
-        amount: item.amount > 0 ? item.amount : 0,
-        categoryId: matchCategoryId(item.category),
-        accountId: matchAccountId(item.paymentMethod, item.lastFourDigits),
-        paymentMethod: item.paymentMethod || 'Debit Card',
-        notes: item.notes || `Scanned statement line via Gemini 3.1 Flash Lite`,
-        selected: true,
-      }));
+      const rows: BulkExpenseRow[] = scannedList.map((item, idx) => {
+        const pm = item.paymentMethod || (item.isCashDeposit ? 'Cash' : 'Debit Card');
+        return {
+          id: `bulk_row_${Date.now()}_${idx}`,
+          date: item.date || new Date().toISOString().split('T')[0],
+          merchant: item.merchant || item.description || `Scanned Item #${idx + 1}`,
+          amount: item.amount > 0 ? item.amount : 0,
+          categoryId: matchCategoryId(item.category),
+          accountId: matchAccountId(item.paymentMethod, item.lastFourDigits),
+          loggedBy: defaultMember,
+          paymentMethod: pm,
+          linkedSelection: '',
+          debtPaymentType: 'installment',
+          notes: item.notes || `Scanned statement line via Gemini 3.1 Flash Lite`,
+          selected: true,
+        };
+      });
 
       setBulkRows(rows);
       setIsBulkMode(true);
@@ -335,6 +347,62 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       setAiSuccessBadge('✨ Details extracted with Gemini 3.1 Flash Lite AI! Please preview & edit before saving.');
       setActiveTab('manual'); // Switch to manual form for preview
     }
+  };
+
+  // Analyze Bulk Rows for Duplicates against existing expenses & other batch rows
+  const bulkDuplicateMap = useMemo(() => {
+    if (!isBulkMode || bulkRows.length === 0) return new Map<string, DuplicateMatchResult>();
+    return analyzeBatchRowDuplicates(bulkRows, existingExpenses);
+  }, [isBulkMode, bulkRows, existingExpenses]);
+
+  const duplicateBulkCount = useMemo(() => {
+    return bulkRows.filter((r) => bulkDuplicateMap.get(r.id)?.isDuplicate).length;
+  }, [bulkRows, bulkDuplicateMap]);
+
+  // Single form duplicate check
+  const singleDuplicateInfo = useMemo(() => {
+    if (isBulkMode || !amount) return { isDuplicate: false, confidence: 'low' as const };
+    const numAmt = evaluateMathExpression(amount) || 0;
+    if (numAmt <= 0) return { isDuplicate: false, confidence: 'low' as const };
+    return checkDuplicateExpense(
+      {
+        id: initialExpense?.id,
+        amount: numAmt,
+        title,
+        merchant: title,
+        date,
+        categoryId,
+        accountId,
+        notes,
+        loggedBy,
+        paymentMethod,
+      },
+      existingExpenses
+    );
+  }, [isBulkMode, amount, title, date, categoryId, accountId, notes, loggedBy, paymentMethod, existingExpenses, initialExpense?.id]);
+
+  const handleDeselectDuplicates = () => {
+    setBulkRows((prev) =>
+      prev.map((r) => {
+        const dup = bulkDuplicateMap.get(r.id);
+        if (dup?.isDuplicate) {
+          return { ...r, selected: false };
+        }
+        return r;
+      })
+    );
+  };
+
+  const handleSelectAllDuplicates = () => {
+    setBulkRows((prev) =>
+      prev.map((r) => {
+        const dup = bulkDuplicateMap.get(r.id);
+        if (dup?.isDuplicate) {
+          return { ...r, selected: true };
+        }
+        return r;
+      })
+    );
   };
 
   // Camera Input: Allows taking multiple pictures (adds to array)
@@ -530,20 +598,38 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       return;
     }
 
-    const createdExpenses: Expense[] = selectedRows.map((r, idx) => ({
-      id: `exp_bulk_${Date.now()}_${idx}`,
-      periodId: currentPeriodId,
-      categoryId: r.categoryId,
-      amount: r.amount,
-      title: r.merchant.trim(),
-      date: r.date,
-      loggedBy,
-      accountId: r.accountId,
-      paymentMethod: r.paymentMethod,
-      notes: r.notes.trim() || 'Scanned via Bulk Statement Loader (Gemini AI)',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }));
+    const createdExpenses: Expense[] = selectedRows.map((r, idx) => {
+      let linkedDebtId: string | undefined = undefined;
+      let targetAccountId: string | undefined = undefined;
+      let transferType: 'standard' | 'debt_payment' | 'internal_transfer' = 'standard';
+
+      if (r.linkedSelection?.startsWith('debt:')) {
+        linkedDebtId = r.linkedSelection.replace('debt:', '');
+        transferType = 'debt_payment';
+      } else if (r.linkedSelection?.startsWith('account:')) {
+        targetAccountId = r.linkedSelection.replace('account:', '');
+        transferType = 'internal_transfer';
+      }
+
+      return {
+        id: `exp_bulk_${Date.now()}_${idx}`,
+        periodId: currentPeriodId,
+        categoryId: r.categoryId,
+        amount: r.amount,
+        title: r.merchant.trim(),
+        date: r.date,
+        loggedBy: r.loggedBy || defaultMember,
+        accountId: r.accountId,
+        paymentMethod: r.paymentMethod || 'Debit Card',
+        linkedDebtId,
+        targetAccountId,
+        transferType,
+        debtPaymentType: (linkedDebtId || (targetAccountId && ['credit_card', 'home_loan', 'vehicle_loan', 'loan'].includes(accounts.find(a => a.id === targetAccountId)?.type || ''))) ? r.debtPaymentType || 'installment' : undefined,
+        notes: r.notes.trim() || 'Scanned via Bulk Statement Loader (Gemini AI)',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    });
 
     if (onSaveBulk) {
       onSaveBulk(createdExpenses);
@@ -571,7 +657,10 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       amount: 0,
       categoryId: defaultCategoryId || categories[0]?.id || '',
       accountId: accounts.find((a) => a.isDefault)?.id || accounts[0]?.id || '',
+      loggedBy: defaultMember,
       paymentMethod: 'Debit Card',
+      linkedSelection: '',
+      debtPaymentType: 'installment',
       notes: 'Manually added to statement',
       selected: true,
     };
@@ -588,9 +677,11 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     .filter((r) => r.selected)
     .reduce((sum, r) => sum + (r.amount || 0), 0);
 
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto overflow-x-hidden">
-      <div className={`bg-[#1C1C1E] border border-white/10 rounded-t-[28px] sm:rounded-[26px] ${isBulkMode ? 'max-w-4xl' : 'max-w-xl'} w-full p-4 sm:p-6 shadow-2xl my-0 sm:my-8 text-white max-h-[92vh] overflow-y-auto overflow-x-hidden flex flex-col box-border transition-all duration-300`}>
+      <div className={`bg-[#1C1C1E] border border-white/10 rounded-t-[28px] sm:rounded-[26px] ${isBulkMode ? 'max-w-7xl' : 'max-w-xl'} w-full p-4 sm:p-6 shadow-2xl my-0 sm:my-8 text-white max-h-[92vh] overflow-y-auto overflow-x-hidden flex flex-col box-border transition-all duration-300`}>
         
         {/* iOS Grabber */}
         <div className="w-10 h-1.2 bg-white/25 rounded-full mx-auto mb-3 sm:hidden shrink-0" />
@@ -754,7 +845,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
             
             {/* Spreadsheet Summary Toolbar */}
             <div className="p-3 bg-[#2C2C2E] border border-white/10 rounded-[16px] flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={toggleAllBulkRows}
@@ -776,6 +867,20 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Line Row</span>
                 </button>
+
+                {duplicateBulkCount > 0 && (
+                  <div className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 rounded-[10px] text-amber-300 font-semibold text-xs">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>{duplicateBulkCount} possible duplicate{duplicateBulkCount > 1 ? 's' : ''} detected</span>
+                    <button
+                      type="button"
+                      onClick={handleDeselectDuplicates}
+                      className="ml-1.5 px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 rounded-[6px] text-[10px] font-bold transition cursor-pointer"
+                    >
+                      Uncheck All Duplicates
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-4 font-bold text-slate-200">
@@ -787,119 +892,261 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
             </div>
 
             {/* Excel Table Spreadsheet Container */}
-            <div className="overflow-x-auto border border-white/10 rounded-[16px] bg-[#2C2C2E] max-h-[50vh] overflow-y-auto">
+            <div className="overflow-x-auto border border-white/10 rounded-[16px] bg-[#2C2C2E] max-h-[52vh] overflow-y-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-[#1C1C1E] text-slate-400 font-semibold border-b border-white/10 sticky top-0 z-20">
+                  <tr className="bg-[#1C1C1E] text-slate-400 font-semibold border-b border-white/10 sticky top-0 z-20 whitespace-nowrap">
                     <th className="p-2.5 text-center w-10">Use</th>
-                    <th className="p-2.5 min-w-[110px]">Date</th>
-                    <th className="p-2.5 min-w-[160px]">Merchant / Payee</th>
-                    <th className="p-2.5 min-w-[150px]">Category Envelope</th>
-                    <th className="p-2.5 min-w-[140px]">Paid Account</th>
-                    <th className="p-2.5 min-w-[110px] text-right">Amount (ZAR)</th>
+                    <th className="p-2.5 min-w-[115px]">Status</th>
+                    <th className="p-2.5 min-w-[125px]">Date</th>
+                    <th className="p-2.5 min-w-[170px]">Merchant / Payee *</th>
+                    <th className="p-2.5 min-w-[130px] text-right">Amount (ZAR) *</th>
+                    <th className="p-2.5 min-w-[160px]">Category Envelope *</th>
+                    <th className="p-2.5 min-w-[150px]">Paid Account *</th>
+                    <th className="p-2.5 min-w-[110px]">Logged By</th>
+                    <th className="p-2.5 min-w-[130px]">Payment Method</th>
+                    <th className="p-2.5 min-w-[170px]">Link to Debt / Account</th>
+                    <th className="p-2.5 min-w-[130px]">Debt Rule</th>
+                    <th className="p-2.5 min-w-[180px]">Notes</th>
                     <th className="p-2.5 w-10 text-center">Delete</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {bulkRows.map((row, index) => (
-                    <tr
-                      key={row.id}
-                      className={`transition ${
-                        row.selected ? 'hover:bg-white/[0.04]' : 'opacity-40 bg-black/20'
-                      }`}
-                    >
-                      {/* Checkbox */}
-                      <td className="p-2 text-center">
-                        <input
-                          type="checkbox"
-                          checked={row.selected}
-                          onChange={(e) => updateBulkRow(row.id, { selected: e.target.checked })}
-                          className="w-4 h-4 rounded accent-[#30D158] cursor-pointer"
-                        />
-                      </td>
+                  {bulkRows.map((row) => {
+                    const dupResult = bulkDuplicateMap.get(row.id);
+                    const isDup = dupResult?.isDuplicate || false;
 
-                      {/* Date */}
-                      <td className="p-2">
-                        <input
-                          type="date"
-                          value={row.date}
-                          onChange={(e) => updateBulkRow(row.id, { date: e.target.value })}
-                          className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
-                        />
-                      </td>
+                    const showDebtPaymentType = Boolean(
+                      row.linkedSelection?.startsWith('debt:') ||
+                      (row.linkedSelection?.startsWith('account:') &&
+                        ['credit_card', 'home_loan', 'vehicle_loan', 'loan'].includes(
+                          accounts.find((a) => a.id === row.linkedSelection.replace('account:', ''))?.type || ''
+                        ))
+                    );
 
-                      {/* Merchant */}
-                      <td className="p-2">
-                        <input
-                          type="text"
-                          value={row.merchant}
-                          onChange={(e) => updateBulkRow(row.id, { merchant: e.target.value })}
-                          placeholder="Merchant name"
-                          className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs font-semibold focus:ring-1 focus:ring-[#30D158]"
-                        />
-                      </td>
-
-                      {/* Category */}
-                      <td className="p-2">
-                        <select
-                          value={row.categoryId}
-                          onChange={(e) => updateBulkRow(row.id, { categoryId: e.target.value })}
-                          className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
-                        >
-                          {categories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-
-                      {/* Paid Account */}
-                      <td className="p-2">
-                        <select
-                          value={row.accountId}
-                          onChange={(e) => updateBulkRow(row.id, { accountId: e.target.value })}
-                          className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
-                        >
-                          {accounts.map((acc) => (
-                            <option key={acc.id} value={acc.id}>
-                              {acc.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-
-                      {/* Amount */}
-                      <td className="p-2 text-right">
-                        <div className="relative">
-                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">
-                            R
-                          </span>
+                    return (
+                      <tr
+                        key={row.id}
+                        className={`transition ${
+                          isDup
+                            ? 'bg-amber-500/10 hover:bg-amber-500/20 border-l-4 border-l-amber-500'
+                            : row.selected
+                            ? 'hover:bg-white/[0.04]'
+                            : 'opacity-40 bg-black/20'
+                        }`}
+                      >
+                        {/* Checkbox */}
+                        <td className="p-2 text-center">
                           <input
-                            type="number"
-                            step="0.01"
-                            value={row.amount || ''}
-                            onChange={(e) => updateBulkRow(row.id, { amount: parseFloat(e.target.value) || 0 })}
-                            className="w-full bg-[#1C1C1E] border border-white/10 text-[#30D158] font-bold pl-6 pr-2 py-1.5 rounded-[8px] text-xs text-right focus:ring-1 focus:ring-[#30D158]"
+                            type="checkbox"
+                            checked={row.selected}
+                            onChange={(e) => updateBulkRow(row.id, { selected: e.target.checked })}
+                            className="w-4 h-4 rounded accent-[#30D158] cursor-pointer"
                           />
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Delete Action */}
-                      <td className="p-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => deleteBulkRow(row.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-[6px] transition cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        {/* Status / Duplicate Indicator */}
+                        <td className="p-2 whitespace-nowrap">
+                          {isDup ? (
+                            <div className="flex flex-col gap-0.5" title={dupResult?.reason}>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40 w-fit">
+                                <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                <span>Duplicate?</span>
+                              </span>
+                              <span className="text-[9px] text-amber-200/75 truncate max-w-[130px]" title={dupResult?.reason}>
+                                {dupResult?.reason}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white/5 text-slate-400 border border-white/10 w-fit">
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span>Ready</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Date */}
+                        <td className="p-2">
+                          <input
+                            type="date"
+                            value={row.date}
+                            onChange={(e) => updateBulkRow(row.id, { date: e.target.value })}
+                            className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
+                          />
+                        </td>
+
+                        {/* Merchant */}
+                        <td className="p-2">
+                          <input
+                            type="text"
+                            value={row.merchant}
+                            onChange={(e) => updateBulkRow(row.id, { merchant: e.target.value })}
+                            placeholder="Merchant name"
+                            className={`w-full bg-[#1C1C1E] border ${
+                              isDup ? 'border-amber-500/50 text-amber-100' : 'border-white/10 text-white'
+                            } px-2 py-1.5 rounded-[8px] text-xs font-semibold focus:ring-1 focus:ring-[#30D158]`}
+                          />
+                        </td>
+
+                        {/* Amount */}
+                        <td className="p-2 text-right">
+                          <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">
+                              R
+                            </span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={row.amount || ''}
+                              onChange={(e) => updateBulkRow(row.id, { amount: parseFloat(e.target.value) || 0 })}
+                              className={`w-full bg-[#1C1C1E] border ${
+                                isDup ? 'border-amber-500/50 text-amber-300' : 'border-white/10 text-[#30D158]'
+                              } font-bold pl-6 pr-2 py-1.5 rounded-[8px] text-xs text-right focus:ring-1 focus:ring-[#30D158]`}
+                            />
+                          </div>
+                        </td>
+
+                        {/* Category */}
+                        <td className="p-2">
+                          <select
+                            value={row.categoryId}
+                            onChange={(e) => updateBulkRow(row.id, { categoryId: e.target.value })}
+                            className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
+                          >
+                            {categories.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.tag ? `[#${c.tag}] ` : ''}{c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Paid Account */}
+                        <td className="p-2">
+                          <select
+                            value={row.accountId}
+                            onChange={(e) => updateBulkRow(row.id, { accountId: e.target.value })}
+                            className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
+                          >
+                            {accounts.map((acc) => (
+                              <option key={acc.id} value={acc.id}>
+                                {acc.name} ({formatZAR(acc.balance)})
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Logged By */}
+                        <td className="p-2">
+                          <select
+                            value={row.loggedBy || defaultMember}
+                            onChange={(e) => updateBulkRow(row.id, { loggedBy: e.target.value as LoggedBy })}
+                            className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
+                          >
+                            <option value="Wifey">Wifey</option>
+                            <option value="Hubby">Hubby</option>
+                          </select>
+                        </td>
+
+                        {/* Payment Method */}
+                        <td className="p-2">
+                          <select
+                            value={row.paymentMethod || 'Debit Card'}
+                            onChange={(e) => updateBulkRow(row.id, { paymentMethod: e.target.value })}
+                            className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
+                          >
+                            {PAYMENT_METHODS.map((pm) => (
+                              <option key={pm} value={pm}>
+                                {pm}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Linked Debt / Account */}
+                        <td className="p-2">
+                          <select
+                            value={row.linkedSelection || ''}
+                            onChange={(e) => updateBulkRow(row.id, { linkedSelection: e.target.value })}
+                            className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
+                          >
+                            <option value="">None (Regular Expense)</option>
+                            {debts.length > 0 && (
+                              <optgroup label="Credit & Debts">
+                                {debts.map((debt) => (
+                                  <option key={debt.id} value={`debt:${debt.id}`}>
+                                    Pay Debt: {debt.name} ({formatZAR(debt.currentBalance)})
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {accounts.length > 1 && (
+                              <optgroup label="Transfer to Account">
+                                {accounts
+                                  .filter((a) => a.id !== row.accountId)
+                                  .map((acc) => (
+                                    <option key={acc.id} value={`account:${acc.id}`}>
+                                      Transfer: {acc.name} ({acc.type})
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            )}
+                          </select>
+                        </td>
+
+                        {/* Debt Rule */}
+                        <td className="p-2">
+                          {showDebtPaymentType ? (
+                            <select
+                              value={row.debtPaymentType || 'installment'}
+                              onChange={(e) => updateBulkRow(row.id, { debtPaymentType: e.target.value as 'installment' | 'direct_deposit' })}
+                              className="w-full bg-[#1C1C1E] border border-white/10 text-amber-300 px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
+                            >
+                              <option value="installment">Standard Installment</option>
+                              <option value="direct_deposit">Direct Capital Deposit</option>
+                            </select>
+                          ) : (
+                            <span className="text-slate-500 text-[11px] px-2 block italic">—</span>
+                          )}
+                        </td>
+
+                        {/* Notes */}
+                        <td className="p-2">
+                          <input
+                            type="text"
+                            value={row.notes}
+                            onChange={(e) => updateBulkRow(row.id, { notes: e.target.value })}
+                            placeholder="Optional notes..."
+                            className="w-full bg-[#1C1C1E] border border-white/10 text-white px-2 py-1.5 rounded-[8px] text-xs focus:ring-1 focus:ring-[#30D158]"
+                          />
+                        </td>
+
+                        {/* Delete Action */}
+                        <td className="p-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => deleteBulkRow(row.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-[6px] transition cursor-pointer"
+                            title="Delete row"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+
+            {duplicateBulkCount > 0 && (
+              <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-[12px] text-xs text-amber-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Duplicate Detector:</strong> Highlighted rows in orange match existing records in this period or repeat in this statement batch. You can uncheck them or modify amounts/merchants before saving.
+                </span>
+              </div>
+            )}
 
             {/* Bulk Footer Actions */}
             <div className="pt-3 border-t border-white/[0.08] flex items-center justify-between gap-3 shrink-0">
@@ -1213,7 +1460,9 @@ Payment made at order placement R311.94`;
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 required
-                className="w-full max-w-full min-w-0 box-border bg-[#2C2C2E] border border-white/10 text-white px-3.5 py-2.5 rounded-[14px] text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#30D158]"
+                className={`w-full max-w-full min-w-0 box-border bg-[#2C2C2E] border ${
+                  singleDuplicateInfo.isDuplicate ? 'border-amber-500/60 ring-1 ring-amber-500/40' : 'border-white/10'
+                } text-white px-3.5 py-2.5 rounded-[14px] text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#30D158]`}
               />
               <div className="flex items-center gap-1.5 overflow-x-auto py-2 scrollbar-none w-full max-w-full">
                 <span className="text-[10px] text-slate-500 shrink-0">Quick:</span>
@@ -1228,6 +1477,32 @@ Payment made at order placement R311.94`;
                   </button>
                 ))}
               </div>
+
+              {/* Single Form Duplicate Advisory Banner */}
+              {singleDuplicateInfo.isDuplicate && (
+                <div className="mt-1 mb-2 p-3 bg-amber-500/15 border border-amber-500/35 rounded-[14px] flex items-start gap-2.5 text-xs text-amber-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-amber-300">Possible Duplicate Expense</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] uppercase font-bold bg-amber-500/25 text-amber-300 border border-amber-500/30">
+                        {singleDuplicateInfo.confidence} confidence
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber-200/90 mt-0.5 leading-relaxed">
+                      {singleDuplicateInfo.reason}
+                    </p>
+                    {singleDuplicateInfo.matchedExpense && (
+                      <p className="text-[10px] text-amber-300/80 mt-1 font-mono">
+                        Matched: R{singleDuplicateInfo.matchedExpense.amount.toFixed(2)} on {singleDuplicateInfo.matchedExpense.date} ({singleDuplicateInfo.matchedExpense.title})
+                      </p>
+                    )}
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Advisory note only: You can still save this transaction if it was an intentional separate expense.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Category selection */}

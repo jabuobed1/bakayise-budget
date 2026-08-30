@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { FinancialAccount, BudgetPeriod } from '../../types';
 import { SOUTH_AFRICAN_INSTITUTIONS } from '../../utils/budgetConstants';
 import { formatZAR } from '../../utils/southAfricaHolidays';
@@ -8,7 +8,7 @@ import {
   getCostOptimizationTip,
   TransactionType,
 } from '../../utils/bankChargesEngine';
-import { Landmark, Banknote, X, MapPin, Building2, Wallet, Plus, ArrowUpRight, Info } from 'lucide-react';
+import { Landmark, Banknote, X, MapPin, Building2, Wallet, Plus, ArrowUpRight, Info, AlertCircle } from 'lucide-react';
 
 interface AtmCashDepositModalProps {
   isOpen: boolean;
@@ -38,25 +38,9 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
   initialDestinationAccountId,
   onExecuteDeposit,
 }) => {
-  // Find default bank account (cheque or savings)
-  const bankAccounts = accounts.filter(
-    (a) => a.type === 'cheque' || a.type === 'savings' || a.type === 'tax_free'
-  );
-  const cashAccounts = accounts.filter((a) => a.type === 'cash');
-
-  const getBalance = (acc: FinancialAccount) => {
-    return accountBalances?.[acc.id] ?? (acc.openingBalance || 0);
-  };
-
-  const [destinationAccountId, setDestinationAccountId] = useState<string>(
-    initialDestinationAccountId || bankAccounts[0]?.id || accounts[0]?.id || ''
-  );
-
-  const [sourceType, setSourceType] = useState<'cash_wallet' | 'external_atm_cash'>(
-    cashAccounts.length > 0 ? 'cash_wallet' : 'external_atm_cash'
-  );
-  const [cashAccountId, setCashAccountId] = useState<string>(cashAccounts[0]?.id || '');
-
+  const [destinationAccountId, setDestinationAccountId] = useState<string>('');
+  const [sourceType, setSourceType] = useState<'cash_wallet' | 'external_atm_cash'>('external_atm_cash');
+  const [cashAccountId, setCashAccountId] = useState<string>('');
   const [amount, setAmount] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [depositChannel, setDepositChannel] = useState<'bank_atm' | 'retail_till'>('bank_atm');
@@ -64,7 +48,41 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
   const [reference, setReference] = useState<string>('ATM Cash Deposit');
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Sync state when modal opens or accounts change
+  useEffect(() => {
+    if (isOpen && accounts.length > 0) {
+      const bankAccounts = accounts.filter(
+        (a) => a.type === 'cheque' || a.type === 'savings' || a.type === 'tax_free'
+      );
+      const cashAccounts = accounts.filter((a) => a.type === 'cash');
+
+      const resolvedDestId =
+        (initialDestinationAccountId && accounts.some((a) => a.id === initialDestinationAccountId))
+          ? initialDestinationAccountId
+          : bankAccounts[0]?.id || accounts[0]?.id || '';
+
+      const hasCashAccs = cashAccounts.length > 0;
+      setDestinationAccountId(resolvedDestId);
+      setSourceType(hasCashAccs ? 'cash_wallet' : 'external_atm_cash');
+      setCashAccountId(cashAccounts[0]?.id || '');
+      setAmount('');
+      setDate(new Date().toISOString().split('T')[0]);
+      setDepositChannel('bank_atm');
+      setAtmLocation('Capitec Deposit ATM');
+      setReference('ATM Cash Deposit');
+      setNotes('');
+      setIsSubmitting(false);
+      setErrorMessage(null);
+    }
+  }, [isOpen, initialDestinationAccountId, accounts]);
+
+  const getBalance = (acc: FinancialAccount) => {
+    return accountBalances?.[acc.id] ?? (acc.openingBalance || 0);
+  };
+
+  const cashAccounts = useMemo(() => accounts.filter((a) => a.type === 'cash'), [accounts]);
   const destAccount = accounts.find((a) => a.id === destinationAccountId);
   const cashAccount = accounts.find((a) => a.id === cashAccountId);
   const parsedAmount = parseFloat(amount) || 0;
@@ -91,8 +109,17 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+
     const numAmount = parseFloat(amount);
-    if (!destinationAccountId || !numAmount || numAmount <= 0) return;
+    if (!destinationAccountId) {
+      setErrorMessage('Please select a destination account.');
+      return;
+    }
+    if (!numAmount || numAmount <= 0) {
+      setErrorMessage('Please enter a valid deposit amount greater than 0.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -107,8 +134,9 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
         notes: notes.trim() || undefined,
       });
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to execute ATM cash deposit:', err);
+      setErrorMessage(err?.message || 'Failed to complete deposit. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -372,6 +400,14 @@ export const AtmCashDepositModal: React.FC<AtmCashDepositModalProps> = ({
               <span className="font-mono font-bold text-[#30D158] text-sm">
                 +{formatZAR(parseFloat(amount))}
               </span>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {errorMessage && (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-[14px] flex items-center gap-2 text-xs text-red-400">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMessage}</span>
             </div>
           )}
 

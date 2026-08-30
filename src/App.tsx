@@ -872,7 +872,18 @@ function BakayiseAppContent() {
   }) => {
     const sourceAcc = accounts.find((a) => a.id === transferData.sourceAccountId);
     const destAcc = accounts.find((a) => a.id === transferData.destinationAccountId);
-    if (!sourceAcc || !destAcc || !currentPeriod || !activeWorkspaceId) return;
+    const effectivePeriod = currentPeriod || periods[0];
+    const effectiveWorkspaceId = activeWorkspaceId || sourceAcc?.householdId || destAcc?.householdId;
+
+    if (!sourceAcc || !destAcc) {
+      throw new Error('Please ensure both source and destination accounts are selected.');
+    }
+    if (!effectivePeriod) {
+      throw new Error('No active pay period found. Please create or select a budget period first.');
+    }
+    if (!effectiveWorkspaceId) {
+      throw new Error('No active household workspace found. Please select a workspace.');
+    }
 
     const timestamp = Date.now();
     const dateStr = transferData.date || new Date().toISOString().split('T')[0];
@@ -880,7 +891,7 @@ function BakayiseAppContent() {
 
     const transferExpense: Expense = {
       id: `exp_${transferId}`,
-      periodId: currentPeriod.id,
+      periodId: effectivePeriod.id,
       categoryId: 'transfer',
       expenseClassification: 'internal_transfer',
       isTransfer: true,
@@ -894,14 +905,14 @@ function BakayiseAppContent() {
       transferType: 'internal_transfer',
       notes: transferData.notes,
       transferId: transferId,
-      householdId: activeWorkspaceId,
+      householdId: effectiveWorkspaceId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     const transferIncome: Income = {
       id: `inc_${transferId}`,
-      periodId: currentPeriod.id,
+      periodId: effectivePeriod.id,
       title: `Transfer from ${sourceAcc.name}${transferData.reference ? `: ${transferData.reference}` : ''}`,
       amount: transferData.amount,
       type: 'other',
@@ -917,7 +928,7 @@ function BakayiseAppContent() {
       linkedExpenseId: `exp_${transferId}`,
       notes: transferData.notes,
       transferId: transferId,
-      householdId: activeWorkspaceId,
+      householdId: effectiveWorkspaceId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -936,7 +947,15 @@ function BakayiseAppContent() {
     notes?: string;
   }) => {
     const destAcc = accounts.find((a) => a.id === depositData.destinationAccountId);
-    if (!destAcc || !currentPeriod) return;
+    const effectivePeriod = currentPeriod || periods[0];
+    const effectiveWorkspaceId = activeWorkspaceId || destAcc?.householdId;
+
+    if (!destAcc) {
+      throw new Error('Please select a destination account for the cash deposit.');
+    }
+    if (!effectivePeriod) {
+      throw new Error('No active pay period found. Please create or select a budget period first.');
+    }
 
     const timestamp = Date.now();
     const dateStr = depositData.date || new Date().toISOString().split('T')[0];
@@ -947,7 +966,7 @@ function BakayiseAppContent() {
       if (cashAcc) {
         const cashExpense: Expense = {
           id: `exp_atmdep_${timestamp}`,
-          periodId: currentPeriod.id,
+          periodId: effectivePeriod.id,
           categoryId: 'transfer',
           expenseClassification: 'internal_transfer',
           isTransfer: true,
@@ -961,7 +980,7 @@ function BakayiseAppContent() {
           transferType: 'internal_transfer',
           transferId: depositTransferId,
           notes: depositData.notes,
-          householdId: activeWorkspaceId || undefined,
+          householdId: effectiveWorkspaceId || undefined,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -971,7 +990,7 @@ function BakayiseAppContent() {
 
     const depositIncome: Income = {
       id: `inc_atmdep_${timestamp}`,
-      periodId: currentPeriod.id,
+      periodId: effectivePeriod.id,
       title: `ATM Cash Deposit (${depositData.atmLocation})`,
       amount: depositData.amount,
       type: 'other',
@@ -987,7 +1006,7 @@ function BakayiseAppContent() {
       transferId: depositData.sourceType === 'cash_wallet' ? depositTransferId : undefined,
       linkedExpenseId: depositData.sourceType === 'cash_wallet' ? `exp_atmdep_${timestamp}` : undefined,
       notes: depositData.notes || `Location: ${depositData.atmLocation}`,
-      householdId: activeWorkspaceId || undefined,
+      householdId: effectiveWorkspaceId || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1465,6 +1484,7 @@ function BakayiseAppContent() {
           initialExpense={editingExpense}
           defaultCategoryId={quickCategoryId}
           onOpenAtmDepositModal={() => setIsAtmDepositModalOpen(true)}
+          existingExpenses={expenses}
         />
 
         <IncomeModal

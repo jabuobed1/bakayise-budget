@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { FinancialAccount, BudgetPeriod } from '../../types';
 import { formatZAR } from '../../utils/southAfricaHolidays';
 import {
@@ -7,7 +7,7 @@ import {
   getCostOptimizationTip,
   TransactionType,
 } from '../../utils/bankChargesEngine';
-import { ArrowRightLeft, X, ArrowRight, ShieldCheck, CheckCircle2, Wallet, CreditCard, Building2, Zap, Info } from 'lucide-react';
+import { ArrowRightLeft, X, ArrowRight, ShieldCheck, CheckCircle2, Wallet, CreditCard, Building2, Zap, Info, AlertCircle } from 'lucide-react';
 
 interface AccountTransferModalProps {
   isOpen: boolean;
@@ -35,18 +35,42 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
   initialSourceAccountId,
   onExecuteTransfer,
 }) => {
-  const [sourceAccountId, setSourceAccountId] = useState<string>(
-    initialSourceAccountId || accounts[0]?.id || ''
-  );
-  const [destinationAccountId, setDestinationAccountId] = useState<string>(
-    accounts.find((a) => a.id !== (initialSourceAccountId || accounts[0]?.id))?.id || ''
-  );
+  const [sourceAccountId, setSourceAccountId] = useState<string>('');
+  const [destinationAccountId, setDestinationAccountId] = useState<string>('');
   const [amount, setAmount] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [reference, setReference] = useState<string>('Internal Transfer');
   const [transferSpeed, setTransferSpeed] = useState<'standard_eft' | 'immediate_rtc' | 'payshap'>('standard_eft');
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Sync and auto-populate accounts whenever modal opens or accounts change
+  useEffect(() => {
+    if (isOpen && accounts.length > 0) {
+      const validSourceAccounts = accounts.filter(
+        (acc) => !['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type)
+      );
+
+      const resolvedSourceId =
+        (initialSourceAccountId && validSourceAccounts.some((a) => a.id === initialSourceAccountId))
+          ? initialSourceAccountId
+          : validSourceAccounts[0]?.id || accounts[0]?.id || '';
+
+      const resolvedDestId =
+        accounts.find((a) => a.id !== resolvedSourceId)?.id || '';
+
+      setSourceAccountId(resolvedSourceId);
+      setDestinationAccountId(resolvedDestId);
+      setAmount('');
+      setDate(new Date().toISOString().split('T')[0]);
+      setReference('Internal Transfer');
+      setTransferSpeed('standard_eft');
+      setNotes('');
+      setIsSubmitting(false);
+      setErrorMessage(null);
+    }
+  }, [isOpen, initialSourceAccountId, accounts]);
 
   const sourceAccount = accounts.find((a) => a.id === sourceAccountId);
   const destAccount = accounts.find((a) => a.id === destinationAccountId);
@@ -98,9 +122,25 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+
     const numAmount = parseFloat(amount);
-    if (!sourceAccountId || !destinationAccountId || !numAmount || numAmount <= 0) return;
-    if (sourceAccountId === destinationAccountId) return;
+    if (!sourceAccountId) {
+      setErrorMessage('Please select a source account.');
+      return;
+    }
+    if (!destinationAccountId) {
+      setErrorMessage('Please select a destination account.');
+      return;
+    }
+    if (sourceAccountId === destinationAccountId) {
+      setErrorMessage('Source and Destination accounts cannot be the same.');
+      return;
+    }
+    if (!numAmount || numAmount <= 0) {
+      setErrorMessage('Please enter a valid transfer amount greater than 0.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -113,8 +153,9 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
         notes: notes.trim() || undefined,
       });
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to execute account transfer:', err);
+      setErrorMessage(err?.message || 'Failed to complete transfer. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -398,6 +439,14 @@ export const AccountTransferModal: React.FC<AccountTransferModalProps> = ({
               <span className="font-mono font-bold text-sky-400 text-sm">
                 {formatZAR(parseFloat(amount))}
               </span>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {errorMessage && (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-[14px] flex items-center gap-2 text-xs text-red-400">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMessage}</span>
             </div>
           )}
 
