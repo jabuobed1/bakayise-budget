@@ -386,30 +386,72 @@ export const DAVE_RAMSEY_STEPS = [
 ];
 
 /**
- * Checks if an income entry represents true external income (Salary, Rental, Bonus, Freelance)
- * as opposed to an internal fund movement (Inter-bank transfer) or a liability payoff (Bond / Loan payment).
+ * Checks if an income entry should be included in the Income Streams Ledger and Zero-Based Budget capacity.
+ * 
+ * Rules:
+ * 1. External Incomes (Salary, Rental, Bonus, Freelance) -> Always Included.
+ * 2. Fixed Liabilities (Bonds/Home Loans, Vehicle Finance, Personal Loans, Store Cards) -> Always Excluded (not budgetable).
+ * 3. Normal Accounts (Cheque, Savings, Cash) & Investment/Tax-Free (TFSA, Unit Trusts) -> Always Included.
+ * 4. Credit Cards -> Included (Direct Transfer full amount, Monthly Installment net principal offset).
  */
-export function isExternalIncome(inc: Income): boolean {
-  if (inc.incomeClassification === 'internal_transfer' || inc.incomeClassification === 'debt_payment_deposit') {
+export function isBudgetEligibleIncome(
+  inc: Income,
+  accountsMap?: Map<string, FinancialAccount> | Record<string, FinancialAccount> | FinancialAccount[]
+): boolean {
+  // If explicitly classified as a debt payment deposit or tagged as Debt Payoff for fixed liabilities
+  if (inc.incomeClassification === 'debt_payment_deposit' || inc.sourceTag === 'Debt Payoff') {
     return false;
   }
+
+  // Check destination account if accounts map/list is available
+  if (accountsMap && inc.accountId) {
+    let acc: FinancialAccount | undefined;
+    if (accountsMap instanceof Map) {
+      acc = accountsMap.get(inc.accountId);
+    } else if (Array.isArray(accountsMap)) {
+      acc = accountsMap.find((a) => a.id === inc.accountId);
+    } else {
+      acc = accountsMap[inc.accountId];
+    }
+
+    if (acc) {
+      // Fixed non-spendable liability accounts: excluded from budget income streams
+      if (['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(acc.type)) {
+        return false;
+      }
+      // Spendable accounts (normal bank, cash, tax-free, investment, credit card, etc.): included in income streams!
+      if (['cheque', 'savings', 'cash', 'tax_free', 'investment', 'credit_card', 'other'].includes(acc.type)) {
+        return true;
+      }
+    }
+  }
+
+  // Internal transfers into spendable accounts
+  if (
+    inc.incomeClassification === 'internal_transfer' ||
+    inc.isTransfer === true ||
+    inc.sourceTag === 'Internal Transfer' ||
+    (inc.title && (inc.title.startsWith('Transfer from ') || inc.title.startsWith('ATM Cash Deposit')))
+  ) {
+    return true;
+  }
+
+  // True external income (Salary, Freelance, etc.)
   if (inc.incomeClassification === 'external_income') {
     return true;
   }
-  if (inc.isTransfer === true) {
-    return false;
-  }
-  // Backwards compatibility heuristics for legacy entries:
-  if (
-    Boolean(inc.transferId) ||
-    Boolean(inc.linkedExpenseId) ||
-    Boolean(inc.debtPaymentType) ||
-    (inc.sourceTag && (inc.sourceTag.toLowerCase().includes('internal transfer') || inc.sourceTag.toLowerCase().includes('transfer'))) ||
-    (inc.title && (inc.title.startsWith('Transfer from ') || inc.title.startsWith('Transfer to ')))
-  ) {
-    return false;
-  }
+
   return true;
+}
+
+/**
+ * Standard alias for budget-eligible incomes (External Salaries & Eligible Account Transfers)
+ */
+export function isExternalIncome(
+  inc: Income,
+  accountsMap?: Map<string, FinancialAccount> | Record<string, FinancialAccount> | FinancialAccount[]
+): boolean {
+  return isBudgetEligibleIncome(inc, accountsMap);
 }
 
 /**

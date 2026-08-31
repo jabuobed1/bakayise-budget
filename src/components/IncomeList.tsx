@@ -1,12 +1,13 @@
 import React, { useMemo } from 'react';
-import { Income } from '../types';
+import { Income, FinancialAccount } from '../types';
 import { formatZAR, formatDateNice } from '../utils/southAfricaHolidays';
 import { isExternalIncome } from '../utils/budgetConstants';
 import { FigmaIcon, FigmaIconName } from './ui/FigmaIcon';
-import { Plus, Edit2, Trash2, Tag, Check, Clock, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Edit2, Trash2, Tag, Check, Clock, ChevronDown, ChevronUp, ArrowRightLeft } from 'lucide-react';
 
 interface IncomeListProps {
   incomes: Income[];
+  accounts?: FinancialAccount[];
   onOpenAddIncomeModal: () => void;
   onOpenEditIncomeModal: (inc: Income) => void;
   onDeleteIncome: (incId: string) => void;
@@ -15,6 +16,7 @@ interface IncomeListProps {
 
 export const IncomeList: React.FC<IncomeListProps> = ({
   incomes,
+  accounts,
   onOpenAddIncomeModal,
   onOpenEditIncomeModal,
   onDeleteIncome,
@@ -22,14 +24,19 @@ export const IncomeList: React.FC<IncomeListProps> = ({
 }) => {
   const [isCollapsed, setIsCollapsed] = React.useState(true);
 
-  const displayIncomes = useMemo(() => incomes.filter(isExternalIncome), [incomes]);
+  const displayIncomes = useMemo(() => {
+    return incomes.filter((inc) => isExternalIncome(inc, accounts));
+  }, [incomes, accounts]);
 
   const totalExpected = displayIncomes.reduce((sum, i) => sum + i.amount, 0);
   const totalReceived = displayIncomes
     .filter((i) => i.status === 'received')
     .reduce((sum, i) => sum + i.amount, 0);
 
-  const getIncomeIconName = (type: string): { icon: FigmaIconName; color: string } => {
+  const getIncomeIconName = (type: string, isTransfer?: boolean): { icon: FigmaIconName; color: string } => {
+    if (isTransfer) {
+      return { icon: 'trending', color: '#0EA5E9' };
+    }
     switch (type) {
       case 'primary_salary':
         return { icon: 'building', color: '#30D158' };
@@ -93,7 +100,13 @@ export const IncomeList: React.FC<IncomeListProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
               {displayIncomes.map((inc) => {
                 const isReceived = inc.status === 'received';
-                const { icon, color } = getIncomeIconName(inc.type);
+                const isTransfer =
+                  inc.isTransfer === true ||
+                  inc.incomeClassification === 'internal_transfer' ||
+                  Boolean(inc.transferId) ||
+                  inc.sourceTag === 'Internal Transfer' ||
+                  (inc.title && (inc.title.startsWith('Transfer from ') || inc.title.startsWith('ATM Cash Deposit')));
+                const { icon, color } = getIncomeIconName(inc.type, isTransfer);
 
                 return (
                   <div
@@ -116,12 +129,19 @@ export const IncomeList: React.FC<IncomeListProps> = ({
                             <h4 className="text-sm font-bold text-white truncate tracking-tight" title={inc.title}>
                               {inc.title}
                             </h4>
-                            {inc.sourceTag && (
+                            {isTransfer ? (
+                              <div className="flex items-center gap-1 text-[11px] text-sky-300 mt-0.5">
+                                <span className="px-1.5 py-0.2 rounded-[6px] bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono text-[10px] font-bold inline-flex items-center gap-1">
+                                  <ArrowRightLeft className="w-2.5 h-2.5 text-sky-400" />
+                                  <span>#{inc.sourceTag || 'Transfer'}</span>
+                                </span>
+                              </div>
+                            ) : inc.sourceTag ? (
                               <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5">
                                 <Tag className="w-3 h-3 text-slate-500" />
                                 <span className="truncate">{inc.sourceTag}</span>
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
 

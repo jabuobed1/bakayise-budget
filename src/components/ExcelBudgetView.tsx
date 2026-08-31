@@ -31,6 +31,7 @@ import {
   Sparkles,
   X,
   ChevronRight,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 interface ExcelBudgetViewProps {
@@ -158,10 +159,10 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
     [accounts]
   );
 
-  // Filter true external incomes (exclude inter-account transfers & debt payoff deposits)
+  // Filter true eligible incomes (external incomes + eligible inter-account transfers)
   const externalIncomes = useMemo(() => {
-    return incomes.filter(isExternalIncome);
-  }, [incomes]);
+    return incomes.filter((inc) => isExternalIncome(inc, accountMap));
+  }, [incomes, accountMap]);
 
   // Dynamic budget capacity ledger per bank account
   const accountCapacityMap = useMemo(() => {
@@ -819,6 +820,12 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                     ) : (
                       filteredIncomes.map((inc, index) => {
                         const isReceived = inc.status === 'received';
+                        const isTransfer =
+                          inc.isTransfer === true ||
+                          inc.incomeClassification === 'internal_transfer' ||
+                          Boolean(inc.transferId) ||
+                          inc.sourceTag === 'Internal Transfer' ||
+                          (inc.title && (inc.title.startsWith('Transfer from ') || inc.title.startsWith('ATM Cash Deposit')));
                         const isEditingTitle = editingIncId === inc.id && editingIncField === 'title';
                         const isEditingTag = editingIncId === inc.id && editingIncField === 'sourceTag';
                         const isEditingAmount = editingIncId === inc.id && editingIncField === 'amount';
@@ -881,7 +888,12 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                                 ) : (
                                   <div className="flex items-center justify-between gap-2 group/title">
                                     <div className="flex items-center gap-2 truncate">
-                                      <span className="truncate group-hover/title:text-emerald-400 group-hover/title:underline decoration-dashed decoration-slate-500 underline-offset-4 transition">
+                                      {isTransfer && (
+                                        <div className="w-5 h-5 rounded-[6px] bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0 border border-sky-500/30">
+                                          <ArrowRightLeft className="w-3 h-3" />
+                                        </div>
+                                      )}
+                                      <span className={`truncate group-hover/title:underline decoration-dashed decoration-slate-500 underline-offset-4 transition ${isTransfer ? 'group-hover/title:text-sky-300' : 'group-hover/title:text-emerald-400'}`}>
                                         {inc.title}
                                       </span>
                                       {inc.notes && <span className="text-[10px] text-slate-400 italic font-normal shrink-0">({inc.notes})</span>}
@@ -920,13 +932,20 @@ export const ExcelBudgetView: React.FC<ExcelBudgetViewProps> = ({
                                       }
                                     }}
                                     autoFocus
-                                    className="w-20 bg-[#1C1C1E] border-2 border-[#30D158] text-white px-1.5 py-0.5 rounded-[6px] font-mono text-[10px] focus:outline-none shadow-lg"
+                                    className={`w-24 bg-[#1C1C1E] border-2 ${isTransfer ? 'border-sky-400' : 'border-[#30D158]'} text-white px-1.5 py-0.5 rounded-[6px] font-mono text-[10px] focus:outline-none shadow-lg`}
                                   />
                                 ) : (
                                   <div className="flex items-center justify-between gap-1 group/tag">
-                                    <span className="px-2 py-0.5 rounded-[8px] bg-white/10 text-slate-300 font-mono text-[10px] group-hover/tag:bg-white/20 transition">
-                                      #{inc.sourceTag || 'salary'}
-                                    </span>
+                                    {isTransfer ? (
+                                      <span className="px-2 py-0.5 rounded-[8px] bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono text-[10px] font-bold inline-flex items-center gap-1 group-hover/tag:bg-sky-500/25 transition">
+                                        <ArrowRightLeft className="w-2.5 h-2.5 text-sky-400 shrink-0" />
+                                        <span>#{inc.sourceTag || 'Transfer'}</span>
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded-[8px] bg-white/10 text-slate-300 font-mono text-[10px] group-hover/tag:bg-white/20 transition">
+                                        #{inc.sourceTag || 'salary'}
+                                      </span>
+                                    )}
                                     <Edit2 className="w-2.5 h-2.5 text-slate-500 opacity-0 group-hover/tag:opacity-100 transition shrink-0" />
                                   </div>
                                 )}

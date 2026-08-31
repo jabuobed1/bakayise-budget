@@ -85,7 +85,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       }
     });
 
-    incomes.filter(i => i.status === 'received' && isExternalIncome(i)).forEach(inc => {
+    incomes.filter(i => i.status === 'received' && isExternalIncome(i, accountMap)).forEach(inc => {
       const matchesCycle = selectedCycleId === 'all' || inc.periodId === selectedCycleId;
       if (matchesCycle) {
         totalSettledIncome += inc.amount || 0;

@@ -1377,31 +1377,40 @@ export async function saveExpense(expense: Expense): Promise<void> {
         }
       }
 
-      // Check whether target account is a debt/liability account
-      let isDebtOrLiability = Boolean(expense.linkedDebtId);
-      if (!isDebtOrLiability && expense.targetAccountId) {
+      // Check whether target account is a fixed debt/liability account vs credit card vs normal asset account
+      let targetAccType = '';
+      if (expense.targetAccountId) {
         try {
           const tAccSnap = await getDoc(doc(db, 'financial_accounts', expense.targetAccountId));
           if (tAccSnap.exists()) {
             const tData = tAccSnap.data() as FinancialAccount;
-            if (['home_loan', 'vehicle_loan', 'loan', 'credit_card'].includes(tData.type)) {
-              isDebtOrLiability = true;
-            }
+            targetAccType = tData.type || '';
           }
         } catch {
           // ignore
         }
       }
 
-      const classification: 'external_income' | 'internal_transfer' | 'debt_payment_deposit' = isDebtOrLiability
+      const isCreditCard = targetAccType === 'credit_card';
+      const isFixedLiability = ['home_loan', 'vehicle_loan', 'loan', 'store_card'].includes(targetAccType);
+      const isDebtPayoff = isFixedLiability || (!isCreditCard && Boolean(expense.linkedDebtId));
+
+      const classification: 'external_income' | 'internal_transfer' | 'debt_payment_deposit' = isDebtPayoff
         ? 'debt_payment_deposit'
         : 'internal_transfer';
 
-      const incomeTitle = isDebtOrLiability
+      const incomeTitle = isDebtPayoff
         ? `Debt Payment from ${sourceName}: ${expense.title}`
-        : `Transfer from ${sourceName}: ${expense.title}`;
+        : `Transfer from ${sourceName}${expense.title ? `: ${expense.title}` : ''}`;
 
-      const sourceTag = isDebtOrLiability ? 'Debt Payoff' : 'Internal Transfer';
+      const sourceTag = isDebtPayoff ? 'Debt Payoff' : 'Internal Transfer';
+
+      // For credit cards, if it's a monthly installment payment with interest/fees deduction,
+      // the income amount equals the net principal offset so income stream & transactions match!
+      // For direct deposits or standard bank transfers, use the full transferred amount.
+      const effectiveIncomeAmount = (isCreditCard && expense.debtPaymentType === 'installment' && principalReduction !== undefined)
+        ? principalReduction
+        : expense.amount;
 
       await setDoc(
         doc(db, 'incomes', pairedIncId),
@@ -1409,7 +1418,7 @@ export async function saveExpense(expense: Expense): Promise<void> {
           id: pairedIncId,
           periodId: expense.periodId,
           title: incomeTitle,
-          amount: expense.amount,
+          amount: effectiveIncomeAmount,
           type: 'other',
           incomeClassification: classification,
           isTransfer: true,
