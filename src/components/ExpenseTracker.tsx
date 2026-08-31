@@ -4,7 +4,22 @@ import { formatZAR, formatDateNice } from '../utils/southAfricaHolidays';
 import { isInternalTransferExpense, isExternalExpense } from '../utils/budgetConstants';
 import { FigmaIcon } from './ui/FigmaIcon';
 import { LastEditTag } from './ui/LastEditTag';
-import { Search, Plus, Edit2, Trash2, Calendar, CreditCard, User, Users, Landmark, ArrowRightLeft } from 'lucide-react';
+import { ExpenseAnalyticsDashboard } from './ExpenseAnalyticsDashboard';
+import {
+  Search,
+  Plus,
+  Edit2,
+  Trash2,
+  Calendar,
+  CreditCard,
+  User,
+  Users,
+  Landmark,
+  ArrowRightLeft,
+  LayoutList,
+  BarChart3,
+  Sparkles
+} from 'lucide-react';
 
 interface ExpenseTrackerProps {
   expenses: Expense[];
@@ -23,6 +38,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
   onOpenEditExpenseModal,
   onDeleteExpense,
 }) => {
+  const [viewMode, setViewMode] = useState<'records' | 'analytics'>('records');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
   const [selectedSpenderFilter, setSelectedSpenderFilter] = useState<string>('all');
@@ -117,7 +133,7 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
     <div className="space-y-5">
       
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-[14px] bg-[#30D158]/15 border border-[#30D158]/30 flex items-center justify-center text-[#30D158] shrink-0">
             <FigmaIcon name="receipt" size="md" strokeWidth={2.4} />
@@ -127,19 +143,66 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
               <span>Family Expense Tracker</span>
             </h2>
             <p className="text-xs text-slate-400">
-              Transactions logged by Hubby, Wifey, and Shared Household with account tracking
+              Transactions logged by Hubby, Wifey, and Shared Household with analytics & account tracking
             </p>
           </div>
         </div>
 
-        <button
-          onClick={onOpenAddExpenseModal}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-[12px] bg-[#30D158] hover:bg-[#34C759] text-black text-xs sm:text-sm font-bold shadow-md shadow-emerald-950/40 transition-all active:scale-95 cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" strokeWidth={2.8} />
-          <span>Log Expense</span>
-        </button>
+        {/* Action Controls: View Toggler & Log Expense Button */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Segmented View Mode Toggler */}
+          <div className="bg-[#1C1C1E] border border-white/[0.08] p-1 rounded-[14px] flex items-center shadow-inner">
+            <button
+              onClick={() => setViewMode('records')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'records'
+                  ? 'bg-[#2C2C2E] text-white shadow-sm border border-white/10'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <LayoutList className="w-3.5 h-3.5" />
+              <span>Expense List</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/10 text-slate-300 font-mono">
+                {expenses.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setViewMode('analytics')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'analytics'
+                  ? 'bg-gradient-to-r from-emerald-500/30 to-sky-500/30 text-white shadow-sm border border-emerald-500/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Metrics & Analysis</span>
+              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                Dashboard
+              </span>
+            </button>
+          </div>
+
+          <button
+            onClick={onOpenAddExpenseModal}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-[12px] bg-[#30D158] hover:bg-[#34C759] text-black text-xs sm:text-sm font-bold shadow-md shadow-emerald-950/40 transition-all active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Plus className="w-4 h-4" strokeWidth={2.8} />
+            <span>Log Expense</span>
+          </button>
+        </div>
       </div>
+
+      {viewMode === 'analytics' ? (
+        <ExpenseAnalyticsDashboard
+          expenses={expenses}
+          categories={categories}
+          accounts={accounts}
+          onOpenEditExpenseModal={onOpenEditExpenseModal}
+          onOpenAddExpenseModal={onOpenAddExpenseModal}
+        />
+      ) : (
+        <>
 
       {/* Family Spender Breakdown Cards (Apple Inset Cards) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
@@ -415,6 +478,8 @@ export const ExpenseTracker: React.FC<ExpenseTrackerProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
 
     </div>
   );
